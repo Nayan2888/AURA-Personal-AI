@@ -1,0 +1,22 @@
+# IDE
+.idea/
+*.iml
+.externalNativeBuild/
+.cxx/
+
+# Build outputs
+build/
+**/build/
+.gradle/
+local.properties
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+
+# OS files
+.DS_Store
+Thumbs.db
