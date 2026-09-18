@@ -21,7 +21,7 @@ data class AuthorizationRequest(
 enum class AuthorizationDecision {
     ALLOWED,
     CONFIRMATION_REQUIRED,
-    DENIED
+    DENIED,
 
     val isAllowed: Boolean
         get() = this == ALLOWED
