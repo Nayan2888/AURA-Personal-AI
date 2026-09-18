@@ -21,14 +21,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses > /dev/null || true
 
-      - name: Set up Gradle
+      - name: Install Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
