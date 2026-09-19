@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.widget.ImageView
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -43,10 +44,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,7 +61,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.chat.ChatSession
 import ai.aura.personal.core.history.ChatHistoryStore
+import ai.aura.personal.core.inference.AssistantRuntimeManager
+import ai.aura.personal.core.inference.LocalModelStore
 import ai.aura.personal.core.navigation.AuraDestination
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private data class SelectedAttachment(
     val uri: Uri,
@@ -85,6 +94,9 @@ class MainActivity : ComponentActivity() {
 private fun AuraRoot() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val historyStore = remember { ChatHistoryStore(context) }
+    val modelStore = remember { LocalModelStore(context) }
+    val runtime = remember { AssistantRuntimeManager() }
+    val scope = rememberCoroutineScope()
     var session by remember { mutableStateOf(ChatSession("main-session")) }
     var sessionName by remember { mutableStateOf("AURA Chat") }
     var draft by remember { mutableStateOf("") }
@@ -95,6 +107,11 @@ private fun AuraRoot() {
     var showRename by remember { mutableStateOf(false) }
     var renameDraft by remember { mutableStateOf("") }
     var history by remember { mutableStateOf(historyStore.list()) }
+    var selectedModelPath by remember { mutableStateOf(modelStore.selectedModel()?.absolutePath) }
+    var modelRevision by remember { mutableStateOf(0) }
+    var modelLoading by remember { mutableStateOf(false) }
+    var isProcessing by remember { mutableStateOf(false) }
+    var runtimeError by remember { mutableStateOf<String?>(null) }
     val attachments = remember { mutableStateMapOf<String, SelectedAttachment>() }
 
     fun refreshHistory() {
@@ -106,6 +123,42 @@ private fun AuraRoot() {
             historyStore.save(session, sessionName)
             refreshHistory()
         }
+    }
+
+    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val name = displayName(context, uri)
+            scope.launch {
+                runtimeError = null
+                runCatching {
+                    withContext(Dispatchers.IO) { modelStore.importModel(uri, name) }
+                }.onSuccess { imported ->
+                    selectedModelPath = imported.absolutePath
+                    modelRevision += 1
+                }.onFailure { error ->
+                    runtimeError = error.message ?: "Local model import failed."
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(selectedModelPath, modelRevision) {
+        modelLoading = selectedModelPath != null
+        runtimeError = null
+        if (selectedModelPath == null) {
+            runtime.close()
+        } else {
+            runCatching {
+                runtime.load(File(selectedModelPath!!))
+            }.onFailure { error ->
+                runtimeError = error.message ?: "Local model initialization failed."
+            }
+        }
+        modelLoading = false
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { runtime.close() }
     }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -127,21 +180,41 @@ private fun AuraRoot() {
         val text = draft.trim()
         val attachment = selectedAttachment
         if (text.isEmpty() && attachment == null) return
-        val messageId = "message-${session.state.messages.size + 1}"
-        val updated = session.appendMessage(
-            ChatMessage(
-                id = messageId,
-                role = ChatMessage.Role.USER,
-                content = text.ifEmpty { "Attachment" },
-                createdAtEpochMs = System.currentTimeMillis()
-            )
+        if (isProcessing || !runtime.isReady()) return
+
+        val messageId = "message-" + (session.state.messages.size + 1)
+        val userMessage = ChatMessage(
+            id = messageId,
+            role = ChatMessage.Role.USER,
+            content = text.ifEmpty { "Attachment" },
+            createdAtEpochMs = System.currentTimeMillis()
         )
+        val updated = session.appendMessage(userMessage)
         session = updated
         if (attachment != null) attachments[messageId] = attachment
         historyStore.save(updated, sessionName)
         refreshHistory()
         draft = ""
         selectedAttachment = null
+        runtimeError = null
+        isProcessing = true
+
+        scope.launch {
+            try {
+                val assistantMessage = runtime.respond(
+                    history = updated.state.messages.dropLast(1),
+                    userMessage = userMessage
+                )
+                val completed = updated.appendMessage(assistantMessage)
+                session = completed
+                historyStore.save(completed, sessionName)
+                refreshHistory()
+            } catch (error: Throwable) {
+                runtimeError = error.message ?: "Local inference failed."
+            } finally {
+                isProcessing = false
+            }
+        }
     }
 
     fun openHistory(id: String) {
@@ -186,7 +259,7 @@ private fun AuraRoot() {
                     title = {
                         Column {
                             Text(sessionName, style = MaterialTheme.typography.titleLarge)
-                            Text("Learn • Assist • Evolve", style = MaterialTheme.typography.labelSmall)
+                            Text(
                         }
                     },
                     actions = {
@@ -209,6 +282,18 @@ private fun AuraRoot() {
                                 session = ChatSession(session.id)
                                 attachments.clear()
                                 selectedAttachment = null
+                                menuExpanded = false
+                            })
+                            DropdownMenuItem(text = { Text("Install local model") }, onClick = {
+                                modelPicker.launch(arrayOf("application/octet-stream", "*/*"))
+                                menuExpanded = false
+                            })
+                            DropdownMenuItem(text = { Text("Remove local model") }, enabled = selectedModelPath != null, onClick = {
+                                runtime.close()
+                                modelStore.selectedModel()?.delete()
+                                modelStore.clearSelection()
+                                selectedModelPath = null
+                                runtimeError = null
                                 menuExpanded = false
                             })
                             DropdownMenuItem(text = { Text("Session info") }, onClick = {
@@ -243,7 +328,7 @@ private fun AuraRoot() {
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 TextButton(onClick = { picker.launch(arrayOf("image/*", "application/pdf", "text/*", "application/octet-stream")) }) { Text("＋", style = MaterialTheme.typography.headlineSmall) }
                                 OutlinedTextField(value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f), minLines = 1, maxLines = 4, placeholder = { Text("Message AURA…") })
-                                TextButton(onClick = { sendMessage() }, enabled = draft.isNotBlank() || selectedAttachment != null) { Text("➤", style = MaterialTheme.typography.headlineSmall) }
+                                TextButton(onClick = { sendMessage() }, enabled = (draft.isNotBlank() || selectedAttachment != null) && runtime.isReady() && !isProcessing) { Text("➤", style = MaterialTheme.typography.headlineSmall) }
                             }
                         }
                         NavigationBar {
@@ -273,7 +358,14 @@ private fun AuraRoot() {
         ) { paddingValues ->
             Surface(modifier = Modifier.fillMaxSize().padding(paddingValues), color = MaterialTheme.colorScheme.background) {
                 when (selectedDestination) {
-                    AuraDestination.CHAT -> ChatScreen(session = session, attachments = attachments)
+                    AuraDestination.CHAT -> ChatScreen(
+                        session = session,
+                        attachments = attachments,
+                        modelReady = runtime.isReady(),
+                        modelLoading = modelLoading,
+                        isProcessing = isProcessing,
+                        errorMessage = runtimeError
+                    )
                     AuraDestination.MEMORY -> HistoryScreen(
                         history = history,
                         onOpen = ::openHistory,
@@ -289,27 +381,36 @@ private fun AuraRoot() {
 }
 
 @Composable
-private fun ChatScreen(session: ChatSession, attachments: Map<String, SelectedAttachment>) {
+private fun ChatScreen(
+    session: ChatSession,
+    attachments: Map<String, SelectedAttachment>,
+    modelReady: Boolean,
+    modelLoading: Boolean,
+    isProcessing: Boolean,
+    errorMessage: String?
+) {
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("AURA is ready", style = MaterialTheme.typography.titleMedium)
+                    Text(
                     Spacer(modifier = Modifier.size(4.dp))
-                    Text("Your conversation workspace. Real model, research, tools and learning will connect through this interface.")
+                    Text(
                 }
             }
         }
-        if (session.state.messages.isEmpty()) {
-            item { Text("What would you like to do?", style = MaterialTheme.typography.titleMedium) }
+        errorMessage?.let { error ->
             item {
-                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = {}) { Text("📚 Learn") }
-                    TextButton(onClick = {}) { Text("🔧 Plan a task") }
-                    TextButton(onClick = {}) { Text("🌐 Research") }
-                    TextButton(onClick = {}) { Text("🧠 Memory") }
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Inference status", style = MaterialTheme.typography.labelLarge)
+                        Text(error, color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
                 }
             }
+        }
+        if (isProcessing) {
+            item { Text("AURA is generating a real local response…", style = MaterialTheme.typography.bodyMedium) }
         }
         items(session.state.messages, key = { it.id }) { message ->
             val isUser = message.role == ChatMessage.Role.USER
