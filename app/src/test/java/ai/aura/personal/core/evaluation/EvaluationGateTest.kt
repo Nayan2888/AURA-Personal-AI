@@ -12,6 +12,7 @@ class EvaluationGateTest {
         id = "eval-1",
         baseVersionId = "base-1",
         candidateVersionId = "candidate-1",
+        candidateAdapterSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         evaluatedExampleCount = 5,
         baseMeanError = 0.5,
         candidateMeanError = candidateError,
