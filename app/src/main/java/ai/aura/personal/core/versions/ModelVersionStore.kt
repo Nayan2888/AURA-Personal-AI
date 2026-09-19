@@ -69,7 +69,7 @@ class ModelVersionStore(
     fun activateCandidate(
         candidateId: String,
         evaluationReport: EvaluationReport,
-        approvalGranted: Boolean,
+        approval: ActivationApproval?,
         maxQualityRegression: Double = 0.0
     ): ActivationResult {
         val data = loadData()
@@ -87,6 +87,23 @@ class ModelVersionStore(
         }
         if (evaluationReport.baseVersionId.isBlank()) {
             return ActivationResult.REJECTED("Evaluation base version is missing")
+        }
+        val explicitApproval = approval
+            ?: return ActivationResult.REJECTED("Activation approval is required")
+        if (explicitApproval.candidateVersionId != candidateId) {
+            return ActivationResult.REJECTED(
+                "Activation approval candidate id does not match candidate"
+            )
+        }
+        if (explicitApproval.evaluationReportId != evaluationReport.id) {
+            return ActivationResult.REJECTED(
+                "Activation approval evaluation id does not match report"
+            )
+        }
+        if (explicitApproval.grantedAtEpochMs < evaluationReport.completedAtEpochMs) {
+            return ActivationResult.REJECTED(
+                "Activation approval must be granted after evaluation completed"
+            )
         }
         requireCandidateAdapter(candidate.adapterFile)
 
@@ -115,7 +132,7 @@ class ModelVersionStore(
 
         val decision = EvaluationGate.check(
             report = evaluationReport,
-            approvalGranted = approvalGranted,
+            approvalGranted = true,
             maxQualityRegression = maxQualityRegression
         )
         if (decision != EvaluationGate.Decision.PASSED) {

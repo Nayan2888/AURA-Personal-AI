@@ -62,7 +62,7 @@ AURA is a private personal assistant. It is separate from the Nayan AI/Gemini pr
 
 A candidate must never replace the active version merely because it was trained successfully. Activation requires measurable evaluation results, safety checks, compatibility checks, and explicit approval where configured.
 
-Evaluation evidence is persisted as immutable `EvaluationReport` records before version activation. The report remains evidence only; saving it does not activate a model.
+Evaluation evidence is persisted as immutable `EvaluationReport` records before version activation. Explicit approvals are separately persisted, scoped to the candidate and evaluation report, and must be granted after evaluation completion. The production activation boundary consumes those persisted records rather than a transient boolean flag.
 
 ## 6. Initial implementation order
 

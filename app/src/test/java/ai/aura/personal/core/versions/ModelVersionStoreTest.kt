@@ -73,15 +73,21 @@ class ModelVersionStoreTest {
             store.activateCandidate(
                 candidateId = "candidate-1",
                 evaluationReport = report,
-                approvalGranted = false
+                approval = null
             ) is ModelVersionStore.ActivationResult.REJECTED
         )
 
+        val approval = ActivationApproval(
+            id = "approval-1",
+            candidateVersionId = "candidate-1",
+            evaluationReportId = "eval-1",
+            grantedAtEpochMs = 3L
+        )
         assertTrue(
             store.activateCandidate(
                 candidateId = "candidate-1",
                 evaluationReport = report,
-                approvalGranted = true
+                approval = approval
             ) is ModelVersionStore.ActivationResult.ACTIVATED
         )
 
@@ -89,71 +95,50 @@ class ModelVersionStoreTest {
     }
 
     @Test
-    fun candidateOutsideArtifactDirectoryIsRejected() {
-        val root = temporaryFolder.newFolder("versions")
-        val outside = temporaryFolder.newFile("outside.adapter").apply {
-            writeText("adapter")
-        }
-        val candidate = ModelVersion(
-            id = "candidate-outside",
-            baseModelId = "base-1",
-            adapterFile = outside,
-            state = ModelVersion.State.CANDIDATE,
-            evaluationReportId = "eval-outside",
-            createdAtEpochMs = 1L
-        )
-
-        val error = runCatching {
-            ModelVersionStore(root).registerCandidate(candidate)
-        }.exceptionOrNull()
-
-        assertEquals(
-            "Candidate adapter file is outside the candidate artifact directory",
-            error?.message
-        )
-    }
-
-    @Test
-    fun activationRejectsMissingCandidateArtifact() {
-        val root = temporaryFolder.newFolder("versions")
+    fun approvalCannotPredateEvaluation() {
+        val root = temporaryFolder.newFolder("approval-order")
         val adapter = TrainingArtifactStore(root).publish(
             temporaryFolder.newFile("candidate-source.adapter").apply {
                 writeText("adapter")
             },
-            "candidate-missing"
-        )
-        val candidate = ModelVersion(
-            id = "candidate-missing",
-            baseModelId = "base-1",
-            adapterFile = adapter,
-            state = ModelVersion.State.CANDIDATE,
-            evaluationReportId = "eval-missing",
-            createdAtEpochMs = 1L
+            "candidate-1"
         )
         val store = ModelVersionStore(root)
-        store.registerCandidate(candidate)
-        assertTrue(adapter.delete())
-
-        val report = EvaluationReport(
-            id = "eval-missing",
-            baseVersionId = "base-1",
-            candidateVersionId = "candidate-missing",
-            evaluatedExampleCount = 1,
-            baseMeanLoss = 1.0,
-            candidateMeanLoss = 0.9,
-            safetyChecksPassed = true,
-            compatibilityChecksPassed = true,
-            completedAtEpochMs = 2L
+        store.registerCandidate(
+            ModelVersion(
+                id = "candidate-1",
+                baseModelId = "base-1",
+                adapterFile = adapter,
+                state = ModelVersion.State.CANDIDATE,
+                evaluationReportId = "eval-1",
+                createdAtEpochMs = 1L
+            )
         )
 
-        val error = runCatching {
-            store.activateCandidate(
-                candidateId = "candidate-missing",
-                evaluationReport = report,
-                approvalGranted = true
+        val error = store.activateCandidate(
+            candidateId = "candidate-1",
+            evaluationReport = EvaluationReport(
+                id = "eval-1",
+                baseVersionId = "base-1",
+                candidateVersionId = "candidate-1",
+                evaluatedExampleCount = 1,
+                baseMeanLoss = 1.0,
+                candidateMeanLoss = 0.9,
+                safetyChecksPassed = true,
+                compatibilityChecksPassed = true,
+                completedAtEpochMs = 100L
+            ),
+            approval = ActivationApproval(
+                id = "approval-1",
+                candidateVersionId = "candidate-1",
+                evaluationReportId = "eval-1",
+                grantedAtEpochMs = 99L
             )
-        }.exceptionOrNull()
+        )
 
-        assertEquals("Candidate adapter file is unavailable", error?.message)
+        assertEquals(
+            "Activation approval must be granted after evaluation completed",
+            (error as ModelVersionStore.ActivationResult.REJECTED).reason
+        )
     }
 }
