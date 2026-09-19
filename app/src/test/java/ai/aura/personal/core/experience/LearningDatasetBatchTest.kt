@@ -1,6 +1,5 @@
 package ai.aura.personal.core.experience
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -80,12 +79,11 @@ class LearningDatasetBatchTest {
 
         val jsonl = LearningDatasetBuilder.toJsonl(entries)
         val line = jsonl.trimEnd().lineSequence().single()
-        val json = JSONObject(line)
-
-        assertEquals("नमस्ते", json.getString("input"))
-        assertEquals("हैलो", json.getString("target"))
-        assertEquals(false, json.has("sourceExperienceId"))
-        assertEquals(false, json.has("createdAtEpochMs"))
+        assertEquals("""{"input":"नमस्ते","target":"हैलो"}""", line)
+        assertTrue(line.contains(""" "input" """.trim()))
+        assertTrue(line.contains(""" "target" """.trim()))
+        assertTrue(!line.contains("sourceExperienceId"))
+        assertTrue(!line.contains("createdAtEpochMs"))
     }
 
     @Test
