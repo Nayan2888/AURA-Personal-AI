@@ -61,12 +61,11 @@ class ExecuTorchTrainingSession(
         }
 
         val lossTensor = outputs.first().toTensor()
-        val lossValues = when (lossTensor.numel()) {
-            1L -> lossTensor.getDataAsFloatArray()
-            else -> throw IllegalStateException(
-                "Training loss must be a scalar tensor."
-            )
+        check(lossTensor.numel() == 1L) {
+            "Training loss must be a scalar tensor."
         }
+
+        val lossValues = lossTensor.dataAsFloatArray
         check(lossValues.size == 1) {
             "Training loss must contain exactly one value."
         }
