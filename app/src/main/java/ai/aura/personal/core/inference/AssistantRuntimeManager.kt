@@ -26,12 +26,17 @@ class AssistantRuntimeManager : AutoCloseable {
 
     suspend fun respond(
         history: List<ChatMessage>,
-        userMessage: ChatMessage
+        userMessage: ChatMessage,
+        loraAdapterFile: File? = null
     ): ChatMessage {
         val activeEngine = checkNotNull(engine) {
             "No local model is installed. Import a .litertlm model first."
         }
-        return ConversationOrchestrator(activeEngine).respond(history, userMessage)
+        return ConversationOrchestrator(activeEngine).respond(
+            history = history,
+            userMessage = userMessage,
+            loraAdapterFile = loraAdapterFile
+        )
     }
 
     override fun close() {
