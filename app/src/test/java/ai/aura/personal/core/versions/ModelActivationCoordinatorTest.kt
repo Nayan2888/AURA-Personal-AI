@@ -52,8 +52,8 @@ class ModelActivationCoordinatorTest {
                 baseVersionId = "base-1",
                 candidateVersionId = "candidate-1",
                 evaluatedExampleCount = 2,
-                baseMeanLoss = 1.0,
-                candidateMeanLoss = 0.9,
+                baseMeanError = 1.0,
+                candidateMeanError = 0.9,
                 safetyChecksPassed = true,
                 compatibilityChecksPassed = true,
                 completedAtEpochMs = 100L
@@ -108,8 +108,8 @@ class ModelActivationCoordinatorTest {
                 baseVersionId = "base-1",
                 candidateVersionId = "candidate-1",
                 evaluatedExampleCount = 1,
-                baseMeanLoss = 1.0,
-                candidateMeanLoss = 0.9,
+                baseMeanError = 1.0,
+                candidateMeanError = 0.9,
                 safetyChecksPassed = true,
                 compatibilityChecksPassed = true,
                 completedAtEpochMs = 100L
