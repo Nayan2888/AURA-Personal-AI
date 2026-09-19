@@ -61,6 +61,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.chat.ChatSession
 import ai.aura.personal.core.history.ChatHistoryStore
+import ai.aura.personal.core.evaluation.EvaluationReportStore
 import ai.aura.personal.core.inference.AssistantRuntimeManager
 import ai.aura.personal.core.experience.ExperienceCapture
 import ai.aura.personal.core.experience.ExperienceFeedback
@@ -70,6 +71,7 @@ import ai.aura.personal.core.experience.LearningConsentStore
 import ai.aura.personal.core.experience.LearningDatasetStore
 import ai.aura.personal.core.inference.LocalModelStore
 import ai.aura.personal.core.navigation.AuraDestination
+import ai.aura.personal.core.versions.ModelVersionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -101,10 +103,17 @@ private fun AuraRoot() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val historyStore = remember { ChatHistoryStore(context) }
     val modelStore = remember { LocalModelStore(context) }
+    val modelVersionStore = remember { ModelVersionStore(context.filesDir) }
+    val evaluationReportStore = remember { EvaluationReportStore(context.filesDir) }
     val experienceStore = remember { ExperienceStore(context) }
     val learningConsentStore = remember { LearningConsentStore(context) }
     val learningDatasetStore = remember { LearningDatasetStore(context) }
-    val runtime = remember { AssistantRuntimeManager() }
+    val runtime = remember {
+        AssistantRuntimeManager(
+            modelVersionStore = modelVersionStore,
+            evaluationReportStore = evaluationReportStore
+        )
+    }
     val scope = rememberCoroutineScope()
     var session by remember { mutableStateOf(ChatSession("main-session")) }
     var sessionName by remember { mutableStateOf("AURA Chat") }
