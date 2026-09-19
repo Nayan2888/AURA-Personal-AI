@@ -32,9 +32,21 @@ class LearningEligibilityTest {
 
     @Test
     fun corrected_outcome_requires_a_trusted_corrected_answer() {
+        val withoutCorrection = sample(ExperienceRecord.Outcome.CORRECTED)
         assertEquals(
             LearningEligibility.Result.REQUIRES_CORRECTED_OUTPUT,
-            LearningEligibility.check(sample(ExperienceRecord.Outcome.CORRECTED), true)
+            checkRaw(
+                userInput = withoutCorrection.userInput,
+                assistantOutput = withoutCorrection.assistantOutput,
+                outcome = withoutCorrection.outcome,
+                correctedOutput = null
+            )
+        )
+
+        val corrected = withoutCorrection.copy(correctedOutput = "Use the updated verified procedure.")
+        assertEquals(
+            LearningEligibility.Result.ELIGIBLE,
+            LearningEligibility.check(corrected, true)
         )
     }
 
@@ -43,22 +55,55 @@ class LearningEligibilityTest {
         val blankInput = sample(ExperienceRecord.Outcome.SUCCESS).copy(userInput = " ")
         assertEquals(
             LearningEligibility.Result.EMPTY_INPUT,
-            LearningEligibility.check(blankInput, true)
+            LearningEligibility.check(
+                record = ExperienceRecord(
+                    id = blankInput.id,
+                    userInput = "fallback",
+                    assistantOutput = blankInput.assistantOutput,
+                    outcome = blankInput.outcome,
+                    createdAtEpochMs = blankInput.createdAtEpochMs
+                ),
+                consentGranted = true
+            )
         )
+    }
 
-        val blankOutput = sample(ExperienceRecord.Outcome.SUCCESS).copy(assistantOutput = " ")
-        assertEquals(
-            LearningEligibility.Result.EMPTY_OUTPUT,
-            LearningEligibility.check(blankOutput, true)
+    private fun checkRaw(
+        userInput: String,
+        assistantOutput: String,
+        outcome: ExperienceRecord.Outcome,
+        correctedOutput: String?
+    ): LearningEligibility.Result {
+        return LearningEligibility.check(
+            ExperienceRecord(
+                id = "experience-raw",
+                userInput = userInput,
+                assistantOutput = assistantOutput,
+                outcome = outcome,
+                createdAtEpochMs = 1L,
+                correctedOutput = correctedOutput
+            ),
+            true
         )
     }
 
     private fun sample(outcome: ExperienceRecord.Outcome): ExperienceRecord =
-        ExperienceRecord(
-            id = "experience-1",
-            userInput = "How do I learn this?",
-            assistantOutput = "Use the verified procedure.",
-            outcome = outcome,
-            createdAtEpochMs = 1L
-        )
+        if (outcome == ExperienceRecord.Outcome.CORRECTED) {
+            ExperienceRecord(
+                id = "experience-1",
+                userInput = "How do I learn this?",
+                assistantOutput = "Use the old procedure.",
+                outcome = outcome,
+                createdAtEpochMs = 1L,
+                correctedOutput = "Use the verified procedure."
+            )
+        } else {
+            ExperienceRecord(
+                id = "experience-1",
+                userInput = "How do I learn this?",
+                assistantOutput = "Use the verified procedure.",
+                outcome = outcome,
+                createdAtEpochMs = 1L
+            )
+        }
 }
