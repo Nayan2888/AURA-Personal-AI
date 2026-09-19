@@ -57,6 +57,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.chat.ChatSession
 import ai.aura.personal.core.history.ChatHistoryStore
+import ai.aura.personal.core.navigation.AuraDestination
 
 private data class SelectedAttachment(
     val uri: Uri,
@@ -88,7 +89,7 @@ private fun AuraRoot() {
     var sessionName by remember { mutableStateOf("AURA Chat") }
     var draft by remember { mutableStateOf("") }
     var selectedAttachment by remember { mutableStateOf<SelectedAttachment?>(null) }
-    var selectedSection by remember { mutableStateOf(0) }
+    var selectedDestination by remember { mutableStateOf(AuraDestination.CHAT) }
     var menuExpanded by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
@@ -148,7 +149,7 @@ private fun AuraRoot() {
         session = restored
         history.firstOrNull { it.id == id }?.let { sessionName = it.title }
         attachments.clear()
-        selectedSection = 0
+        selectedDestination = AuraDestination.CHAT
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
@@ -246,10 +247,24 @@ private fun AuraRoot() {
                             }
                         }
                         NavigationBar {
-                            val labels = listOf("Chat", "Tools", "Memory", "Skills", "Settings")
+                            val destinations = listOf(
+                                AuraDestination.CHAT,
+                                AuraDestination.TOOLS,
+                                AuraDestination.MEMORY,
+                                AuraDestination.SKILLS,
+                                AuraDestination.SETTINGS
+                            )
                             val icons = listOf("⌂", "▦", "◉", "◆", "⚙")
-                            labels.forEachIndexed { index, label ->
-                                NavigationBarItem(selected = selectedSection == index, onClick = { selectedSection = index; if (index == 2) refreshHistory() }, icon = { Text(icons[index]) }, label = { Text(label) })
+                            destinations.forEachIndexed { index, destination ->
+                                NavigationBarItem(
+                                    selected = selectedDestination == destination,
+                                    onClick = {
+                                        selectedDestination = destination
+                                        if (destination == AuraDestination.MEMORY) refreshHistory()
+                                    },
+                                    icon = { Text(icons[index]) },
+                                    label = { Text(destination.title) }
+                                )
                             }
                         }
                     }
@@ -257,10 +272,16 @@ private fun AuraRoot() {
             }
         ) { paddingValues ->
             Surface(modifier = Modifier.fillMaxSize().padding(paddingValues), color = MaterialTheme.colorScheme.background) {
-                if (selectedSection == 2) {
-                    HistoryScreen(history = history, onOpen = ::openHistory, onDelete = { id -> historyStore.delete(id); refreshHistory() })
-                } else {
-                    ChatScreen(session = session, attachments = attachments)
+                when (selectedDestination) {
+                    AuraDestination.CHAT -> ChatScreen(session = session, attachments = attachments)
+                    AuraDestination.MEMORY -> HistoryScreen(
+                        history = history,
+                        onOpen = ::openHistory,
+                        onDelete = { id -> historyStore.delete(id); refreshHistory() }
+                    )
+                    AuraDestination.TOOLS,
+                    AuraDestination.SKILLS,
+                    AuraDestination.SETTINGS -> FeatureStatusScreen(selectedDestination)
                 }
             }
         }
