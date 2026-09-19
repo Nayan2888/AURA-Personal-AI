@@ -1,5 +1,6 @@
 package ai.aura.personal.core.evaluation
 
+import ai.aura.personal.core.security.ArtifactDigest
 import java.io.File
 
 /**
@@ -32,15 +33,21 @@ class ModelEvaluationCoordinator(
             "Candidate version id must not be blank"
         }
 
+        val adapterSha256Before = ArtifactDigest.sha256(candidateAdapterFile)
         val evaluation = evaluationEngine.evaluate(
             examples = examples,
             candidateAdapterFile = candidateAdapterFile
         )
+        val adapterSha256After = ArtifactDigest.sha256(candidateAdapterFile)
+        check(adapterSha256Before == adapterSha256After) {
+            "Candidate adapter changed during evaluation"
+        }
 
         val report = EvaluationReport(
             id = reportId,
             baseVersionId = baseVersionId,
             candidateVersionId = candidateVersionId,
+            candidateAdapterSha256 = adapterSha256After,
             evaluatedExampleCount = evaluation.evaluatedExampleCount,
             baseMeanError = evaluation.baseMeanError,
             candidateMeanError = evaluation.candidateMeanError,
