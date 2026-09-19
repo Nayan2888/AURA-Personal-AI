@@ -1,6 +1,10 @@
 package ai.aura.personal
 
+import android.content.Context
+import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
+import android.widget.ImageView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -39,6 +43,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -46,8 +51,35 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.foundation.shape.RoundedCornerShape
 import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.chat.ChatSession
+
+
+private data class SelectedAttachment(
+    val uri: Uri,
+    val name: String,
+    val mimeType: String
+)
+
+private fun resolveDisplayName(context: Context, uri: Uri): String {
+    context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null
+    )?.use { cursor ->
+        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        if (index >= 0 && cursor.moveToFirst()) {
+            return cursor.getString(index)
+        }
+    }
+    return uri.lastPathSegment ?: "Selected file"
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,7 +98,9 @@ private fun AuraRoot() {
     var showSessionInfo by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameDraft by remember { mutableStateOf(sessionName) }
-    var attachedFileName by remember { mutableStateOf<String?>(null) }
+    var selectedAttachment by remember { mutableStateOf<SelectedAttachment?>(null) }
+    var selectedSection by remember { mutableStateOf(0) }
+    val messageAttachments = remember { mutableStateMapOf<String, SelectedAttachment>() }
 
     val documentPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -85,7 +119,7 @@ private fun AuraRoot() {
             )
             session = session.appendMessage(message)
             draft = ""
-            attachedFileName = null
+            selectedAttachment = null
         }
     }
 
@@ -192,52 +226,130 @@ private fun AuraRoot() {
                     tonalElevation = 8.dp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .imePadding()
                         .navigationBarsPadding()
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp)
-                    ) {
-                        if (attachedFileName != null) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .imePadding()
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            selectedAttachment?.let { attachment ->
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 8.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Text(
+                                            "📎 ${attachment.name}",
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                        if (attachment.mimeType.startsWith("image/")) {
+                                            AndroidView(
+                                                factory = { ctx ->
+                                                    ImageView(ctx).apply {
+                                                        scaleType = ImageView.ScaleType.CENTER_CROP
+                                                        adjustViewBounds = true
+                                                    }
+                                                },
+                                                update = { imageView ->
+                                                    imageView.setImageURI(attachment.uri)
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(150.dp)
+                                                    .padding(top = 8.dp)
+                                                    .clip(RoundedCornerShape(12.dp))
+                                            )
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            TextButton(onClick = { selectedAttachment = null }) {
+                                                Text("Remove")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
+                                verticalAlignment = Alignment.Bottom,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("📎 $attachedFileName", modifier = Modifier.weight(1f))
-                                TextButton(onClick = { attachedFileName = null }) { Text("Remove") }
+                                TextButton(
+                                    onClick = {
+                                        documentPicker.launch(
+                                            arrayOf(
+                                                "image/*",
+                                                "application/pdf",
+                                                "text/*",
+                                                "application/octet-stream"
+                                            )
+                                        )
+                                    },
+                                    modifier = Modifier.padding(bottom = 2.dp)
+                                ) {
+                                    Text("＋", style = MaterialTheme.typography.headlineSmall)
+                                }
+
+                                OutlinedTextField(
+                                    value = draft,
+                                    onValueChange = { draft = it },
+                                    modifier = Modifier.weight(1f),
+                                    minLines = 1,
+                                    maxLines = 4,
+                                    placeholder = { Text("Message AURA…") }
+                                )
+
+                                TextButton(
+                                    onClick = { appendUserMessage(draft) },
+                                    enabled = draft.isNotBlank() || selectedAttachment != null,
+                                    modifier = Modifier.padding(bottom = 2.dp)
+                                ) {
+                                    Text("➤", style = MaterialTheme.typography.headlineSmall)
+                                }
                             }
                         }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.Bottom,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    documentPicker.launch(arrayOf("image/*", "application/pdf", "text/*", "application/octet-stream"))
-                                },
-                                modifier = Modifier.padding(bottom = 2.dp)
-                            ) {
-                                Text("＋")
-                            }
-                            OutlinedTextField(
-                                value = draft,
-                                onValueChange = { draft = it },
-                                modifier = Modifier.weight(1f),
-                                minLines = 1,
-                                maxLines = 4,
-                                placeholder = { Text("Message AURA…") }
+
+                        NavigationBar {
+                            NavigationBarItem(
+                                selected = selectedSection == 0,
+                                onClick = { selectedSection = 0 },
+                                icon = { Text("⌂") },
+                                label = { Text("Chat") }
                             )
-                            Button(
-                                onClick = { appendUserMessage(draft) },
-                                enabled = draft.isNotBlank(),
-                                modifier = Modifier.padding(bottom = 2.dp)
-                            ) {
-                                Text("➤")
-                            }
+                            NavigationBarItem(
+                                selected = selectedSection == 1,
+                                onClick = { selectedSection = 1 },
+                                icon = { Text("▦") },
+                                label = { Text("Tools") }
+                            )
+                            NavigationBarItem(
+                                selected = selectedSection == 2,
+                                onClick = { selectedSection = 2 },
+                                icon = { Text("◉") },
+                                label = { Text("Memory") }
+                            )
+                            NavigationBarItem(
+                                selected = selectedSection == 3,
+                                onClick = { selectedSection = 3 },
+                                icon = { Text("◆") },
+                                label = { Text("Skills") }
+                            )
+                            NavigationBarItem(
+                                selected = selectedSection == 4,
+                                onClick = { selectedSection = 4 },
+                                icon = { Text("⚙") },
+                                label = { Text("Settings") }
+                            )
                         }
                     }
                 }
@@ -326,16 +438,39 @@ private fun AuraRoot() {
                                     Text(
                                         if (isUser) "YOU" else "AURA",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (isUser) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.primary
+                                        color = if (isUser) Color.White.copy(alpha = 0.8f)
+                                        else MaterialTheme.colorScheme.primary
                                     )
                                     Spacer(modifier = Modifier.size(4.dp))
                                     Text(message.content)
+
+                                    messageAttachments[message.id]?.let { attachment ->
+                                        Spacer(modifier = Modifier.size(8.dp))
+                                        Text(
+                                            "📎 ${attachment.name}",
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                        if (attachment.mimeType.startsWith("image/")) {
+                                            AndroidView(
+                                                factory = { ctx ->
+                                                    ImageView(ctx).apply {
+                                                        scaleType = ImageView.ScaleType.CENTER_CROP
+                                                        adjustViewBounds = true
+                                                    }
+                                                },
+                                                update = { imageView ->
+                                                    imageView.setImageURI(attachment.uri)
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(190.dp)
+                                                    .padding(top = 6.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            }
-        }
-    }
-}
+
