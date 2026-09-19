@@ -2,6 +2,8 @@ package ai.aura.personal.core.versions
 
 import ai.aura.personal.core.evaluation.EvaluationGate
 import ai.aura.personal.core.evaluation.EvaluationReport
+import ai.aura.personal.core.evaluation.EvaluationReportStore
+import ai.aura.personal.core.security.ArtifactDigest
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -106,6 +108,12 @@ class ModelVersionStore(
             )
         }
         requireCandidateAdapter(candidate.adapterFile)
+        val candidateAdapterSha256 = ArtifactDigest.sha256(requireNotNull(candidate.adapterFile))
+        if (candidateAdapterSha256 != evaluationReport.candidateAdapterSha256) {
+            return ActivationResult.REJECTED(
+                "Candidate adapter hash does not match evaluation evidence"
+            )
+        }
 
         val currentActive = data.activeId?.let { id ->
             data.versions.firstOrNull {
@@ -315,7 +323,7 @@ class ModelVersionStore(
     }
 
     sealed interface RollbackResult {
-        data class ROLLED_BACK(val versionId: String) : RollbackResult
+        data class ROLLED_BACK(val versionId: String) : ActivationResult
         data class REJECTED(val reason: String) : RollbackResult
     }
 }
