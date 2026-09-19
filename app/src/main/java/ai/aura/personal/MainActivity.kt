@@ -67,6 +67,7 @@ import ai.aura.personal.core.experience.ExperienceFeedback
 import ai.aura.personal.core.experience.ExperienceRecord
 import ai.aura.personal.core.experience.ExperienceStore
 import ai.aura.personal.core.experience.LearningConsentStore
+import ai.aura.personal.core.experience.LearningDatasetStore
 import ai.aura.personal.core.inference.LocalModelStore
 import ai.aura.personal.core.navigation.AuraDestination
 import kotlinx.coroutines.Dispatchers
@@ -102,6 +103,7 @@ private fun AuraRoot() {
     val modelStore = remember { LocalModelStore(context) }
     val experienceStore = remember { ExperienceStore(context) }
     val learningConsentStore = remember { LearningConsentStore(context) }
+    val learningDatasetStore = remember { LearningDatasetStore(context) }
     val runtime = remember { AssistantRuntimeManager() }
     val scope = rememberCoroutineScope()
     var session by remember { mutableStateOf(ChatSession("main-session")) }
@@ -121,11 +123,37 @@ private fun AuraRoot() {
     var runtimeError by remember { mutableStateOf<String?>(null) }
     var learningConsent by remember { mutableStateOf(learningConsentStore.isGranted()) }
     var showLearningConsent by remember { mutableStateOf(false) }
+    var datasetEntryCount by remember { mutableStateOf(0) }
+    var datasetStatus by remember { mutableStateOf<String?>(null) }
     val feedbackStates = remember { mutableStateMapOf<String, ExperienceRecord.Outcome>() }
     val attachments = remember { mutableStateMapOf<String, SelectedAttachment>() }
 
     fun refreshHistory() {
         history = historyStore.list()
+    }
+
+    fun buildLearningDataset() {
+        if (!learningConsent) {
+            datasetStatus = "Enable Learning first."
+            return
+        }
+
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    learningDatasetStore.build(
+                        experienceStore = experienceStore,
+                        consentGranted = true,
+                        createdAtEpochMs = System.currentTimeMillis()
+                    )
+                }
+            }.onSuccess { result ->
+                datasetEntryCount = result.entryCount
+                datasetStatus = "Dataset built: ${result.entryCount} examples"
+            }.onFailure { error ->
+                datasetStatus = error.message ?: "Dataset build failed."
+            }
+        }
     }
 
     fun saveCurrentSession() {
@@ -471,7 +499,12 @@ private fun AuraRoot() {
                     AuraDestination.MEMORY -> HistoryScreen(
                         history = history,
                         onOpen = ::openHistory,
-                        onDelete = { id -> historyStore.delete(id); refreshHistory() }
+                        onDelete = { id -> historyStore.delete(id); refreshHistory() },
+                        learningEnabled = learningConsent,
+                        datasetExists = learningDatasetStore.datasetFile()?.exists() == true,
+                        datasetEntryCount = datasetEntryCount,
+                        datasetStatus = datasetStatus,
+                        onBuildDataset = ::buildLearningDataset
                     )
                     AuraDestination.TOOLS,
                     AuraDestination.SKILLS,
@@ -644,9 +677,47 @@ private fun ChatScreen(
 }
 
 @Composable
-private fun HistoryScreen(history: List<ChatHistoryStore.HistorySummary>, onOpen: (String) -> Unit, onDelete: (String) -> Unit) {
+private fun HistoryScreen(
+    history: List<ChatHistoryStore.HistorySummary>,
+    onOpen: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    learningEnabled: Boolean,
+    datasetExists: Boolean,
+    datasetEntryCount: Int,
+    datasetStatus: String?,
+    onBuildDataset: () -> Unit
+) {
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Chat History", style = MaterialTheme.typography.headlineSmall) }
+
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Learning dataset", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        when {
+                            !learningEnabled -> "Learning is OFF. Enable it from the top-right menu."
+                            datasetExists -> "A real local training dataset exists. It is not trained automatically."
+                            else -> "No dataset artifact has been built yet."
+                        }
+                    )
+                    if (learningEnabled) {
+                        Text("Examples in last build: $datasetEntryCount")
+                        TextButton(onClick = onBuildDataset) {
+                            Text("Build dataset from verified feedback")
+                        }
+                    }
+                    datasetStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
+            }
+        }
+
         if (history.isEmpty()) {
             item { Text("अभी कोई saved conversation नहीं है।") }
         }
