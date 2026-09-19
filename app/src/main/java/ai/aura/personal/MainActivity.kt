@@ -62,6 +62,11 @@ import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.chat.ChatSession
 import ai.aura.personal.core.history.ChatHistoryStore
 import ai.aura.personal.core.inference.AssistantRuntimeManager
+import ai.aura.personal.core.experience.ExperienceCapture
+import ai.aura.personal.core.experience.ExperienceFeedback
+import ai.aura.personal.core.experience.ExperienceRecord
+import ai.aura.personal.core.experience.ExperienceStore
+import ai.aura.personal.core.experience.LearningConsentStore
 import ai.aura.personal.core.inference.LocalModelStore
 import ai.aura.personal.core.navigation.AuraDestination
 import kotlinx.coroutines.Dispatchers
@@ -95,6 +100,8 @@ private fun AuraRoot() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val historyStore = remember { ChatHistoryStore(context) }
     val modelStore = remember { LocalModelStore(context) }
+    val experienceStore = remember { ExperienceStore(context) }
+    val learningConsentStore = remember { LearningConsentStore(context) }
     val runtime = remember { AssistantRuntimeManager() }
     val scope = rememberCoroutineScope()
     var session by remember { mutableStateOf(ChatSession("main-session")) }
@@ -112,6 +119,9 @@ private fun AuraRoot() {
     var modelLoading by remember { mutableStateOf(false) }
     var isProcessing by remember { mutableStateOf(false) }
     var runtimeError by remember { mutableStateOf<String?>(null) }
+    var learningConsent by remember { mutableStateOf(learningConsentStore.isGranted()) }
+    var showLearningConsent by remember { mutableStateOf(false) }
+    val feedbackStates = remember { mutableStateMapOf<String, ExperienceRecord.Outcome>() }
     val attachments = remember { mutableStateMapOf<String, SelectedAttachment>() }
 
     fun refreshHistory() {
@@ -176,6 +186,39 @@ private fun AuraRoot() {
         }
     }
 
+    fun applyExperienceFeedback(
+        assistantMessageId: String,
+        outcome: ExperienceRecord.Outcome,
+        correctedOutput: String? = null
+    ) {
+        if (!learningConsent) return
+
+        val messages = session.state.messages
+        val assistantIndex = messages.indexOfFirst {
+            it.id == assistantMessageId && it.role == ChatMessage.Role.ASSISTANT
+        }
+        if (assistantIndex <= 0) return
+
+        val userMessage = messages.subList(0, assistantIndex)
+            .lastOrNull { it.role == ChatMessage.Role.USER }
+            ?: return
+        val assistantMessage = messages[assistantIndex]
+
+        val existing = experienceStore.load("experience-${userMessage.id}-${assistantMessage.id}")
+        val captured = existing ?: ExperienceCapture.capture(
+            userMessage = userMessage,
+            assistantMessage = assistantMessage,
+            outcome = ExperienceRecord.Outcome.UNKNOWN
+        ) ?: return
+
+        val updated = runCatching {
+            ExperienceFeedback.apply(captured, outcome, correctedOutput)
+        }.getOrNull() ?: return
+
+        experienceStore.save(updated)
+        feedbackStates[assistantMessage.id] = updated.outcome
+    }
+
     fun sendMessage() {
         val text = draft.trim()
         val attachment = selectedAttachment
@@ -208,6 +251,18 @@ private fun AuraRoot() {
                 val completed = updated.appendMessage(assistantMessage)
                 session = completed
                 historyStore.save(completed, sessionName)
+
+                if (learningConsent) {
+                    ExperienceCapture.capture(
+                        userMessage = userMessage,
+                        assistantMessage = assistantMessage,
+                        outcome = ExperienceRecord.Outcome.UNKNOWN
+                    )?.let { record ->
+                        experienceStore.save(record)
+                        feedbackStates[assistantMessage.id] = record.outcome
+                    }
+                }
+
                 refreshHistory()
             } catch (error: Throwable) {
                 runtimeError = error.message ?: "Local inference failed."
