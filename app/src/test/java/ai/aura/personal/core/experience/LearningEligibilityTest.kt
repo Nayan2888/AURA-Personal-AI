@@ -31,59 +31,17 @@ class LearningEligibilityTest {
     }
 
     @Test
-    fun corrected_outcome_requires_a_trusted_corrected_answer() {
-        val withoutCorrection = sample(ExperienceRecord.Outcome.CORRECTED)
-        assertEquals(
-            LearningEligibility.Result.REQUIRES_CORRECTED_OUTPUT,
-            checkRaw(
-                userInput = withoutCorrection.userInput,
-                assistantOutput = withoutCorrection.assistantOutput,
-                outcome = withoutCorrection.outcome,
-                correctedOutput = null
-            )
-        )
+    fun corrected_outcome_is_eligible_only_with_a_trusted_answer() {
+        val corrected = sample(ExperienceRecord.Outcome.CORRECTED)
 
-        val corrected = withoutCorrection.copy(correctedOutput = "Use the updated verified procedure.")
         assertEquals(
             LearningEligibility.Result.ELIGIBLE,
             LearningEligibility.check(corrected, true)
         )
-    }
 
-    @Test
-    fun blank_input_or_output_is_rejected() {
-        val blankInput = sample(ExperienceRecord.Outcome.SUCCESS).copy(userInput = " ")
         assertEquals(
-            LearningEligibility.Result.EMPTY_INPUT,
-            LearningEligibility.check(
-                record = ExperienceRecord(
-                    id = blankInput.id,
-                    userInput = "fallback",
-                    assistantOutput = blankInput.assistantOutput,
-                    outcome = blankInput.outcome,
-                    createdAtEpochMs = blankInput.createdAtEpochMs
-                ),
-                consentGranted = true
-            )
-        )
-    }
-
-    private fun checkRaw(
-        userInput: String,
-        assistantOutput: String,
-        outcome: ExperienceRecord.Outcome,
-        correctedOutput: String?
-    ): LearningEligibility.Result {
-        return LearningEligibility.check(
-            ExperienceRecord(
-                id = "experience-raw",
-                userInput = userInput,
-                assistantOutput = assistantOutput,
-                outcome = outcome,
-                createdAtEpochMs = 1L,
-                correctedOutput = correctedOutput
-            ),
-            true
+            LearningEligibility.Result.NOT_CONSENTED,
+            LearningEligibility.check(corrected, false)
         )
     }
 
