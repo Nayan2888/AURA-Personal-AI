@@ -10,6 +10,7 @@ class EvaluationReportTest {
             id = "eval-1",
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
+            candidateAdapterSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             evaluatedExampleCount = 10,
             baseMeanError = 1.2,
             candidateMeanError = 1.1,
@@ -21,5 +22,6 @@ class EvaluationReportTest {
         assertEquals(1.2, report.baseMeanError, 0.0)
         assertEquals(1.1, report.candidateMeanError, 0.0)
         assertEquals(10, report.evaluatedExampleCount)
+        assertEquals(64, report.candidateAdapterSha256.length)
     }
 }

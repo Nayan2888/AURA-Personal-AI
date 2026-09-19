@@ -1,6 +1,7 @@
 package ai.aura.personal.core.versions
 
 import ai.aura.personal.core.evaluation.EvaluationReport
+import ai.aura.personal.core.security.ArtifactDigest
 import ai.aura.personal.core.training.TrainingArtifactStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -61,6 +62,7 @@ class ModelVersionStoreTest {
             id = "eval-1",
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
+            candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
             evaluatedExampleCount = 5,
             baseMeanError = 0.5,
             candidateMeanError = 0.4,
@@ -121,6 +123,7 @@ class ModelVersionStoreTest {
                 id = "eval-1",
                 baseVersionId = "base-1",
                 candidateVersionId = "candidate-1",
+                candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
                 evaluatedExampleCount = 1,
                 baseMeanError = 0.5,
                 candidateMeanError = 0.4,
@@ -139,6 +142,60 @@ class ModelVersionStoreTest {
         assertEquals(
             "Activation approval must be granted after evaluation completed",
             (error as ModelVersionStore.ActivationResult.REJECTED).reason
+        )
+    }
+
+    @Test
+    fun activationRejectsArtifactChangedAfterEvaluation() {
+        val root = temporaryFolder.newFolder("versions-tampered")
+        val adapter = TrainingArtifactStore(root).publish(
+            temporaryFolder.newFile("candidate-source.adapter").apply {
+                writeText("adapter")
+            },
+            "candidate-1"
+        )
+        val store = ModelVersionStore(root)
+        store.registerCandidate(
+            ModelVersion(
+                id = "candidate-1",
+                baseModelId = "base-1",
+                adapterFile = adapter,
+                state = ModelVersion.State.CANDIDATE,
+                evaluationReportId = "eval-1",
+                createdAtEpochMs = 1L
+            )
+        )
+
+        val report = EvaluationReport(
+            id = "eval-1",
+            baseVersionId = "base-1",
+            candidateVersionId = "candidate-1",
+            candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
+            evaluatedExampleCount = 1,
+            baseMeanError = 0.5,
+            candidateMeanError = 0.4,
+            safetyChecksPassed = true,
+            compatibilityChecksPassed = true,
+            completedAtEpochMs = 2L
+        )
+        val approval = ActivationApproval(
+            id = "approval-1",
+            candidateVersionId = "candidate-1",
+            evaluationReportId = "eval-1",
+            grantedAtEpochMs = 3L
+        )
+
+        adapter.writeText("tampered")
+
+        val result = store.activateCandidate(
+            candidateId = "candidate-1",
+            evaluationReport = report,
+            approval = approval
+        )
+
+        assertEquals(
+            "Candidate adapter hash does not match evaluation evidence",
+            (result as ModelVersionStore.ActivationResult.REJECTED).reason
         )
     }
 }
