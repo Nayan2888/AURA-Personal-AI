@@ -93,6 +93,6 @@ private fun JSONObject.toExperienceRecordOrNull(): ExperienceRecord? = runCatchi
         assistantOutput = getString("assistantOutput"),
         outcome = ExperienceRecord.Outcome.valueOf(getString("outcome")),
         createdAtEpochMs = getLong("createdAtEpochMs"),
-        correctedOutput = optString("correctedOutput", null)
+        correctedOutput = if (has("correctedOutput")) getString("correctedOutput") else null
     )
 }.getOrNull()
