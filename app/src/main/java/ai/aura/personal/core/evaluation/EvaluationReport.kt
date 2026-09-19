@@ -4,6 +4,7 @@ data class EvaluationReport(
     val id: String,
     val baseVersionId: String,
     val candidateVersionId: String,
+    val candidateAdapterSha256: String,
     val evaluatedExampleCount: Int,
     val baseMeanError: Double,
     val candidateMeanError: Double,
@@ -17,6 +18,9 @@ data class EvaluationReport(
         require(candidateVersionId.isNotBlank()) {
             "Candidate version id must not be blank"
         }
+        require(candidateAdapterSha256.matches(SHA256_PATTERN)) {
+            "Candidate adapter SHA-256 must be a lowercase 64-character hexadecimal digest"
+        }
         require(evaluatedExampleCount > 0) {
             "Evaluation must contain at least one example"
         }
@@ -29,5 +33,9 @@ data class EvaluationReport(
         require(completedAtEpochMs >= 0L) {
             "Evaluation timestamp must not be negative"
         }
+    }
+
+    private companion object {
+        private val SHA256_PATTERN = Regex("[0-9a-f]{64}")
     }
 }
