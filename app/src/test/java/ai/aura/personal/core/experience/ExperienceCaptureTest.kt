@@ -26,7 +26,23 @@ class ExperienceCaptureTest {
     }
 
     @Test
-    fun non_user_or_non_assistant_messages_are_rejected() {
+    fun corrected_exchange_keeps_trusted_correction() {
+        val user = ChatMessage("u1", ChatMessage.Role.USER, "Question", 10L)
+        val assistant = ChatMessage("a1", ChatMessage.Role.ASSISTANT, "Wrong answer", 20L)
+
+        val record = ExperienceCapture.capture(
+            userMessage = user,
+            assistantMessage = assistant,
+            outcome = ExperienceRecord.Outcome.CORRECTED,
+            correctedOutput = "Correct verified answer"
+        )
+
+        requireNotNull(record)
+        assertEquals("Correct verified answer", record.correctedOutput)
+    }
+
+    @Test
+    fun invalid_roles_or_missing_correction_are_rejected() {
         val user = ChatMessage("u1", ChatMessage.Role.USER, "Question", 10L)
         val assistant = ChatMessage("a1", ChatMessage.Role.ASSISTANT, "Answer", 20L)
         val system = ChatMessage("s1", ChatMessage.Role.SYSTEM, "System", 30L)
@@ -43,6 +59,13 @@ class ExperienceCaptureTest {
                 userMessage = user,
                 assistantMessage = system,
                 outcome = ExperienceRecord.Outcome.SUCCESS
+            )
+        )
+        assertNull(
+            ExperienceCapture.capture(
+                userMessage = user,
+                assistantMessage = assistant,
+                outcome = ExperienceRecord.Outcome.CORRECTED
             )
         )
     }
