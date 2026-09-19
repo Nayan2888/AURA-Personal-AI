@@ -4,6 +4,7 @@ import ai.aura.personal.core.chat.ChatMessage
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.LoraConfig
 import com.google.ai.edge.litertlm.LogSeverity
 import com.google.ai.edge.litertlm.Message
 import java.io.File
@@ -17,6 +18,7 @@ import kotlinx.coroutines.withContext
  * Real on-device assistant engine backed by LiteRT-LM.
  *
  * The model is supplied by a local .litertlm file; no network call is performed by this class.
+ * Optional LoRA adapters are loaded per conversation and never become active globally.
  */
 class LiteRtLmAssistantEngine(
     private val modelFile: File,
@@ -53,10 +55,15 @@ class LiteRtLmAssistantEngine(
 
     override suspend fun generate(
         history: List<ChatMessage>,
-        userInput: String
+        userInput: String,
+        loraAdapterFile: File?
     ): String = generationMutex.withLock {
         check(isInitialized()) { "Local assistant model is not initialized." }
         check(userInput.isNotBlank()) { "User input must not be blank." }
+        loraAdapterFile?.let {
+            check(it.isFile) { "LoRA adapter file does not exist: ${it.absolutePath}" }
+            check(it.length() > 0L) { "LoRA adapter file is empty: ${it.absolutePath}" }
+        }
 
         withContext(Dispatchers.Default) {
             val initialMessages = history.mapNotNull { message ->
@@ -68,7 +75,12 @@ class LiteRtLmAssistantEngine(
             }
 
             val conversation = engine!!.createConversation(
-                ConversationConfig(initialMessages = initialMessages)
+                ConversationConfig(
+                    initialMessages = initialMessages,
+                    loraConfig = loraAdapterFile?.let {
+                        LoraConfig(loraPath = it.absolutePath)
+                    }
+                )
             )
 
             try {
