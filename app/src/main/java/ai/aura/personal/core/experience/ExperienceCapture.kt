@@ -11,21 +11,25 @@ object ExperienceCapture {
     fun capture(
         userMessage: ChatMessage,
         assistantMessage: ChatMessage,
-        outcome: ExperienceRecord.Outcome
+        outcome: ExperienceRecord.Outcome,
+        correctedOutput: String? = null
     ): ExperienceRecord? {
         if (userMessage.role != ChatMessage.Role.USER) return null
         if (assistantMessage.role != ChatMessage.Role.ASSISTANT) return null
         if (userMessage.content.isBlank() || assistantMessage.content.isBlank()) return null
 
-        return ExperienceRecord(
-            id = "experience-" + userMessage.id + "-" + assistantMessage.id,
-            userInput = userMessage.content,
-            assistantOutput = assistantMessage.content,
-            outcome = outcome,
-            createdAtEpochMs = maxOf(
-                userMessage.createdAtEpochMs,
-                assistantMessage.createdAtEpochMs
+        return runCatching {
+            ExperienceRecord(
+                id = "experience-" + userMessage.id + "-" + assistantMessage.id,
+                userInput = userMessage.content,
+                assistantOutput = assistantMessage.content,
+                outcome = outcome,
+                createdAtEpochMs = maxOf(
+                    userMessage.createdAtEpochMs,
+                    assistantMessage.createdAtEpochMs
+                ),
+                correctedOutput = correctedOutput
             )
-        )
+        }.getOrNull()
     }
 }
