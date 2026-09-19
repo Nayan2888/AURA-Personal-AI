@@ -260,8 +260,14 @@ private fun AuraRoot() {
                         Column {
                             Text(sessionName, style = MaterialTheme.typography.titleLarge)
                             Text(
-                        }
-                    },
+                                when {
+                                    modelLoading -> "Loading local model…"
+                                    runtime.isReady() -> "Local model: " + (modelStore.selectedModelName() ?: "ready")
+                                    else -> "No local model installed"
+                                },
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }                    },
                     actions = {
                         TextButton(onClick = { menuExpanded = true }) { Text("⋮", style = MaterialTheme.typography.headlineSmall) }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
