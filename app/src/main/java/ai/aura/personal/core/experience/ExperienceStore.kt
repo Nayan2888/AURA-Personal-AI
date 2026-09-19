@@ -83,6 +83,7 @@ private fun ExperienceRecord.toJson(): JSONObject = JSONObject().apply {
     put("assistantOutput", assistantOutput)
     put("outcome", outcome.name)
     put("createdAtEpochMs", createdAtEpochMs)
+    correctedOutput?.let { put("correctedOutput", it) }
 }
 
 private fun JSONObject.toExperienceRecordOrNull(): ExperienceRecord? = runCatching {
@@ -91,6 +92,7 @@ private fun JSONObject.toExperienceRecordOrNull(): ExperienceRecord? = runCatchi
         userInput = getString("userInput"),
         assistantOutput = getString("assistantOutput"),
         outcome = ExperienceRecord.Outcome.valueOf(getString("outcome")),
-        createdAtEpochMs = getLong("createdAtEpochMs")
+        createdAtEpochMs = getLong("createdAtEpochMs"),
+        correctedOutput = optString("correctedOutput", null)
     )
 }.getOrNull()
