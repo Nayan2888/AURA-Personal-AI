@@ -51,11 +51,11 @@ class AssistantRuntimeManager(
         userMessage: ChatMessage,
         loraAdapterFile: File? = null
     ): ChatMessage {
+        ensureRuntimeMatchesActiveVersion()
+
         val activeEngine = checkNotNull(engine) {
             "No local model is installed. Import a .litertlm model first."
         }
-
-        ensureRuntimeMatchesActiveVersion()
 
         val pinnedAdapter = loadedAdapterFile
         if (loraAdapterFile != null && !sameFile(loraAdapterFile, pinnedAdapter)) {
