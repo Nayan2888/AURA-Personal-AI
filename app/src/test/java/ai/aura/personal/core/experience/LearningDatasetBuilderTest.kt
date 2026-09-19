@@ -19,6 +19,16 @@ class LearningDatasetBuilderTest {
     }
 
     @Test
+    fun corrected_experience_uses_trusted_correction_as_target() {
+        val record = sample(ExperienceRecord.Outcome.CORRECTED)
+
+        val entry = LearningDatasetBuilder.build(record, consentGranted = true)
+
+        requireNotNull(entry)
+        assertEquals(record.correctedOutput, entry.target)
+    }
+
+    @Test
     fun non_eligible_experiences_are_not_promoted() {
         assertNull(
             LearningDatasetBuilder.build(
@@ -38,20 +48,25 @@ class LearningDatasetBuilderTest {
                 consentGranted = true
             )
         )
-        assertNull(
-            LearningDatasetBuilder.build(
-                sample(ExperienceRecord.Outcome.CORRECTED),
-                consentGranted = true
-            )
-        )
     }
 
     private fun sample(outcome: ExperienceRecord.Outcome): ExperienceRecord =
-        ExperienceRecord(
-            id = "experience-1",
-            userInput = "How do I learn this?",
-            assistantOutput = "Use the verified procedure.",
-            outcome = outcome,
-            createdAtEpochMs = 1L
-        )
+        if (outcome == ExperienceRecord.Outcome.CORRECTED) {
+            ExperienceRecord(
+                id = "experience-1",
+                userInput = "How do I learn this?",
+                assistantOutput = "Use the old procedure.",
+                outcome = outcome,
+                createdAtEpochMs = 1L,
+                correctedOutput = "Use the verified procedure."
+            )
+        } else {
+            ExperienceRecord(
+                id = "experience-1",
+                userInput = "How do I learn this?",
+                assistantOutput = "Use the verified procedure.",
+                outcome = outcome,
+                createdAtEpochMs = 1L
+            )
+        }
 }
