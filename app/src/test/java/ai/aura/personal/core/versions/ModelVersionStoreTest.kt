@@ -2,7 +2,6 @@ package ai.aura.personal.core.versions
 
 import ai.aura.personal.core.evaluation.EvaluationReport
 import ai.aura.personal.core.training.TrainingArtifactStore
-import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -155,6 +154,6 @@ class ModelVersionStoreTest {
             )
         }.exceptionOrNull()
 
-        assertEquals("Candidate adapter file is unavailable", error?.cause?.message ?: error?.message)
+        assertEquals("Candidate adapter file is unavailable", error?.message)
     }
 }

@@ -224,14 +224,20 @@ class ModelVersionStore(
 
     private fun requireStoredAdapter(adapterFile: File?) {
         val file = requireNotNull(adapterFile)
+        if (!file.isFile || file.length() <= 0L) {
+            throw IllegalStateException("Candidate adapter file is unavailable")
+        }
+
         val candidatesRoot = runCatching { candidatesDirectory.toPath().toRealPath() }
             .getOrElse {
                 throw IllegalStateException("Candidate artifact directory is unavailable", it)
             }
+
         val adapterPath = runCatching { file.toPath().toRealPath() }
             .getOrElse {
                 throw IllegalStateException("Candidate adapter file is unavailable", it)
             }
+
         require(adapterPath.startsWith(candidatesRoot)) {
             "Candidate adapter file is outside the candidate artifact directory"
         }
