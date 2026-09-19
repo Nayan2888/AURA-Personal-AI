@@ -51,7 +51,7 @@ class ModelEvaluationEngineTest {
         )
 
         assertEquals(1, result.evaluatedExampleCount)
-        assertEquals(1.0, result.baseMeanError, 0.0)
+        // "base answer" vs "candidate answer" differs by one of two tokens, so\n        // normalized token edit distance is 0.5.\n        assertEquals(0.5, result.baseMeanError, 0.0)
         assertEquals(0.0, result.candidateMeanError, 0.0)
     }
 }
