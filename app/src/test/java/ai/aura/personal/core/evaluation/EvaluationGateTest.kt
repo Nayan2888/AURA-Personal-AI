@@ -5,7 +5,7 @@ import org.junit.Test
 
 class EvaluationGateTest {
     private fun report(
-        candidateLoss: Double = 0.9,
+        candidateError: Double = 0.4,
         safety: Boolean = true,
         compatibility: Boolean = true
     ) = EvaluationReport(
@@ -13,8 +13,8 @@ class EvaluationGateTest {
         baseVersionId = "base-1",
         candidateVersionId = "candidate-1",
         evaluatedExampleCount = 5,
-        baseMeanLoss = 1.0,
-        candidateMeanLoss = candidateLoss,
+        baseMeanError = 0.5,
+        candidateMeanError = candidateError,
         safetyChecksPassed = safety,
         compatibilityChecksPassed = compatibility,
         completedAtEpochMs = 1L
@@ -40,7 +40,7 @@ class EvaluationGateTest {
     fun qualityRegressionBlocksActivationByDefault() {
         assertEquals(
             EvaluationGate.Decision.QUALITY_REGRESSION,
-            EvaluationGate.check(report(candidateLoss = 1.01), approvalGranted = true)
+            EvaluationGate.check(report(candidateError = 0.51), approvalGranted = true)
         )
     }
 
@@ -48,7 +48,7 @@ class EvaluationGateTest {
     fun passingCandidateCanActivate() {
         assertEquals(
             EvaluationGate.Decision.PASSED,
-            EvaluationGate.check(report(candidateLoss = 0.9), approvalGranted = true)
+            EvaluationGate.check(report(candidateError = 0.5), approvalGranted = true)
         )
     }
 }

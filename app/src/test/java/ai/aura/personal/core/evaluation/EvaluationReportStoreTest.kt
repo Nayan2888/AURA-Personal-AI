@@ -18,8 +18,8 @@ class EvaluationReportStoreTest {
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
             evaluatedExampleCount = 5,
-            baseMeanLoss = 1.0,
-            candidateMeanLoss = 0.8,
+            baseMeanError = 1.0,
+            candidateMeanError = 0.8,
             safetyChecksPassed = true,
             compatibilityChecksPassed = true,
             completedAtEpochMs = 100L
@@ -43,8 +43,8 @@ class EvaluationReportStoreTest {
                 baseVersionId = "base",
                 candidateVersionId = "candidate-b",
                 evaluatedExampleCount = 1,
-                baseMeanLoss = 1.0,
-                candidateMeanLoss = 1.0,
+                baseMeanError = 1.0,
+                candidateMeanError = 1.0,
                 safetyChecksPassed = true,
                 compatibilityChecksPassed = true,
                 completedAtEpochMs = 20L
@@ -56,8 +56,8 @@ class EvaluationReportStoreTest {
                 baseVersionId = "base",
                 candidateVersionId = "candidate-a",
                 evaluatedExampleCount = 1,
-                baseMeanLoss = 1.0,
-                candidateMeanLoss = 1.0,
+                baseMeanError = 1.0,
+                candidateMeanError = 1.0,
                 safetyChecksPassed = true,
                 compatibilityChecksPassed = true,
                 completedAtEpochMs = 20L
@@ -79,8 +79,8 @@ class EvaluationReportStoreTest {
             baseVersionId = "base",
             candidateVersionId = "candidate",
             evaluatedExampleCount = 1,
-            baseMeanLoss = 1.0,
-            candidateMeanLoss = 0.9,
+            baseMeanError = 1.0,
+            candidateMeanError = 0.9,
             safetyChecksPassed = true,
             compatibilityChecksPassed = true,
             completedAtEpochMs = 1L

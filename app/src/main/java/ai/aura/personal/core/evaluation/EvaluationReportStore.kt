@@ -10,8 +10,8 @@ import java.util.Properties
 /**
  * Device-local durable storage for immutable evaluation reports.
  *
- * Reports are evidence used by the version activation gate. Saving a report
- * never activates or changes a model version.
+ * Reports are evidence used by the model version activation gate. Saving a
+ * report never activates or changes a model version.
  */
 class EvaluationReportStore(
     private val rootDirectory: File
@@ -68,12 +68,14 @@ class EvaluationReportStore(
                     ?: throw IllegalStateException(
                         "Invalid evaluated example count for " + id
                     )
-            val baseMeanLoss =
-                properties.getProperty(prefix + "baseMeanLoss")?.toDoubleOrNull()
-                    ?: throw IllegalStateException("Invalid base mean loss for " + id)
-            val candidateMeanLoss =
-                properties.getProperty(prefix + "candidateMeanLoss")?.toDoubleOrNull()
-                    ?: throw IllegalStateException("Invalid candidate mean loss for " + id)
+            val baseMeanError =
+                properties.getProperty(prefix + "baseMeanError")?.toDoubleOrNull()
+                    ?: throw IllegalStateException("Invalid base mean error for " + id)
+            val candidateMeanError =
+                properties.getProperty(prefix + "candidateMeanError")?.toDoubleOrNull()
+                    ?: throw IllegalStateException(
+                        "Invalid candidate mean error for " + id
+                    )
             val safetyChecksPassed =
                 properties.getProperty(prefix + "safetyChecksPassed")?.toBooleanStrictOrNull()
                     ?: throw IllegalStateException("Invalid safety result for " + id)
@@ -92,8 +94,8 @@ class EvaluationReportStore(
                 baseVersionId = baseVersionId,
                 candidateVersionId = candidateVersionId,
                 evaluatedExampleCount = evaluatedExampleCount,
-                baseMeanLoss = baseMeanLoss,
-                candidateMeanLoss = candidateMeanLoss,
+                baseMeanError = baseMeanError,
+                candidateMeanError = candidateMeanError,
                 safetyChecksPassed = safetyChecksPassed,
                 compatibilityChecksPassed = compatibilityChecksPassed,
                 completedAtEpochMs = completedAtEpochMs
@@ -116,10 +118,10 @@ class EvaluationReportStore(
                 prefix + "evaluatedExampleCount",
                 report.evaluatedExampleCount.toString()
             )
-            properties.setProperty(prefix + "baseMeanLoss", report.baseMeanLoss.toString())
+            properties.setProperty(prefix + "baseMeanError", report.baseMeanError.toString())
             properties.setProperty(
-                prefix + "candidateMeanLoss",
-                report.candidateMeanLoss.toString()
+                prefix + "candidateMeanError",
+                report.candidateMeanError.toString()
             )
             properties.setProperty(
                 prefix + "safetyChecksPassed",

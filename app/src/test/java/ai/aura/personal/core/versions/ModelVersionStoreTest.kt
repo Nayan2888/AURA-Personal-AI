@@ -62,8 +62,8 @@ class ModelVersionStoreTest {
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
             evaluatedExampleCount = 5,
-            baseMeanLoss = 1.0,
-            candidateMeanLoss = 0.9,
+            baseMeanError = 0.5,
+            candidateMeanError = 0.4,
             safetyChecksPassed = true,
             compatibilityChecksPassed = true,
             completedAtEpochMs = 2L
@@ -122,8 +122,8 @@ class ModelVersionStoreTest {
                 baseVersionId = "base-1",
                 candidateVersionId = "candidate-1",
                 evaluatedExampleCount = 1,
-                baseMeanLoss = 1.0,
-                candidateMeanLoss = 0.9,
+                baseMeanError = 0.5,
+                candidateMeanError = 0.4,
                 safetyChecksPassed = true,
                 compatibilityChecksPassed = true,
                 completedAtEpochMs = 100L

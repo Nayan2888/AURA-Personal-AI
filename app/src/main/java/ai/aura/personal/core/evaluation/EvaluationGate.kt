@@ -15,8 +15,8 @@ object EvaluationGate {
         if (!report.safetyChecksPassed) return Decision.SAFETY_FAILED
         if (!report.compatibilityChecksPassed) return Decision.INCOMPATIBLE
 
-        val allowedLoss = report.baseMeanLoss + maxQualityRegression
-        if (report.candidateMeanLoss > allowedLoss) {
+        val allowedError = report.baseMeanError + maxQualityRegression
+        if (report.candidateMeanError > allowedError) {
             return Decision.QUALITY_REGRESSION
         }
 
