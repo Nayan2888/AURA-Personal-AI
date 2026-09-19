@@ -1,7 +1,5 @@
 package ai.aura.personal.core.experience
 
-import org.json.JSONObject
-
 /**
  * A single supervised learning example.
  *
@@ -26,12 +24,7 @@ object LearningDatasetBuilder {
         record: ExperienceRecord,
         consentGranted: Boolean
     ): LearningDatasetEntry? {
-        if (
-            LearningEligibility.check(
-                record,
-                consentGranted
-            ) != LearningEligibility.Result.ELIGIBLE
-        ) {
+        if (LearningEligibility.check(record, consentGranted) != LearningEligibility.Result.ELIGIBLE) {
             return null
         }
 
@@ -54,12 +47,6 @@ object LearningDatasetBuilder {
         )
     }
 
-    /**
-     * Builds a deterministic batch from all supplied experiences.
-     *
-     * Duplicate input/target pairs are removed so repeated identical feedback
-     * cannot inflate a future training set. Output ordering is deterministic.
-     */
     fun buildAll(
         records: Iterable<ExperienceRecord>,
         consentGranted: Boolean
@@ -68,32 +55,40 @@ object LearningDatasetBuilder {
             .asSequence()
             .mapNotNull { build(it, consentGranted) }
             .distinctBy { it.input to it.target }
-            .sortedWith(
-                compareBy<LearningDatasetEntry>(
-                    { it.createdAtEpochMs },
-                    { it.sourceExperienceId }
-                )
-            )
+            .sortedWith(compareBy<LearningDatasetEntry>({ it.createdAtEpochMs }, { it.sourceExperienceId }))
             .toList()
     }
 
-    /**
-     * Encodes model-facing examples as JSON Lines (JSONL).
-     *
-     * Only input and target are exported. Internal experience IDs and
-     * timestamps remain audit metadata inside the app and are not exposed to
-     * the training payload.
-     */
+    /** Pure Kotlin JSONL encoder; does not depend on Android framework classes. */
     fun toJsonl(entries: Iterable<LearningDatasetEntry>): String {
         val items = entries.toList()
         return items.joinToString(
             separator = "\n",
             postfix = if (items.isNotEmpty()) "\n" else ""
         ) {
-            JSONObject()
-                .put("input", it.input)
-                .put("target", it.target)
-                .toString()
+            "{\"input\":\"" + escapeJson(it.input) + "\",\"target\":\"" + escapeJson(it.target) + "\"}"
+        }
+    }
+
+    private fun escapeJson(value: String): String = buildString(value.length + 16) {
+        value.forEach { character ->
+            when (character) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\b' -> append("\\b")
+                '\u000C' -> append("\\f")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> {
+                    if (character.code < 0x20) {
+                        append("\\u")
+                        append(character.code.toString(16).padStart(4, '0'))
+                    } else {
+                        append(character)
+                    }
+                }
+            }
         }
     }
 }
