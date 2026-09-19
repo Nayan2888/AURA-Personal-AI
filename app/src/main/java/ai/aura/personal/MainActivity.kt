@@ -289,6 +289,37 @@ private fun AuraRoot() {
                 confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Close") } }
             )
         }
+        if (showLearningConsent) {
+            AlertDialog(
+                onDismissRequest = { showLearningConsent = false },
+                title = { Text("Learning & feedback") },
+                text = {
+                    Text(
+                        if (learningConsent) {
+                            "Learning is ON. Completed chat experiences are stored on this device so you can verify answers or provide corrections."
+                        } else {
+                            "Learning is OFF by default. Enable it to store completed chat experiences on this device and provide answer feedback."
+                        }
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val next = !learningConsent
+                        learningConsent = next
+                        learningConsentStore.setGranted(next)
+                        showLearningConsent = false
+                    }) {
+                        Text(if (learningConsent) "Disable" else "Enable")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLearningConsent = false }) {
+                        Text("Close")
+                    }
+                }
+            )
+        }
+
         if (showRename) {
             AlertDialog(
                 onDismissRequest = { showRename = false },
@@ -345,6 +376,13 @@ private fun AuraRoot() {
                                 selectedAttachment = null
                                 menuExpanded = false
                             })
+                            DropdownMenuItem(
+                                text = { Text("Learning: " + if (learningConsent) "ON" else "OFF") },
+                                onClick = {
+                                    showLearningConsent = true
+                                    menuExpanded = false
+                                }
+                            )
                             DropdownMenuItem(text = { Text("Install local model") }, onClick = {
                                 modelPicker.launch(arrayOf("application/octet-stream", "*/*"))
                                 menuExpanded = false
@@ -425,7 +463,10 @@ private fun AuraRoot() {
                         modelReady = runtime.isReady(),
                         modelLoading = modelLoading,
                         isProcessing = isProcessing,
-                        errorMessage = runtimeError
+                        errorMessage = runtimeError,
+                        learningEnabled = learningConsent,
+                        feedbackStates = feedbackStates,
+                        onFeedback = ::applyExperienceFeedback
                     )
                     AuraDestination.MEMORY -> HistoryScreen(
                         history = history,
@@ -448,7 +489,10 @@ private fun ChatScreen(
     modelReady: Boolean,
     modelLoading: Boolean,
     isProcessing: Boolean,
-    errorMessage: String?
+    errorMessage: String?,
+    learningEnabled: Boolean,
+    feedbackStates: Map<String, ExperienceRecord.Outcome>,
+    onFeedback: (String, ExperienceRecord.Outcome, String?) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -511,6 +555,71 @@ private fun ChatScreen(
                         Text(if (isUser) "YOU" else "AURA", style = MaterialTheme.typography.labelSmall)
                         Spacer(modifier = Modifier.size(4.dp))
                         Text(message.content)
+
+                        if (!isUser && learningEnabled) {
+                            var showCorrection by remember(message.id) { mutableStateOf(false) }
+                            var correctionDraft by remember(message.id) { mutableStateOf("") }
+                            val feedback = feedbackStates[message.id]
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = {
+                                    showCorrection = false
+                                    onFeedback(message.id, ExperienceRecord.Outcome.SUCCESS, null)
+                                }) {
+                                    Text(if (feedback == ExperienceRecord.Outcome.SUCCESS) "Helpful ✓" else "Helpful")
+                                }
+                                TextButton(onClick = {
+                                    showCorrection = false
+                                    onFeedback(message.id, ExperienceRecord.Outcome.FAILURE, null)
+                                }) {
+                                    Text(if (feedback == ExperienceRecord.Outcome.FAILURE) "Not helpful ✓" else "Not helpful")
+                                }
+                                TextButton(onClick = { showCorrection = true }) {
+                                    Text(if (feedback == ExperienceRecord.Outcome.CORRECTED) "Corrected ✓" else "Correct")
+                                }
+                            }
+
+                            if (showCorrection) {
+                                AlertDialog(
+                                    onDismissRequest = { showCorrection = false },
+                                    title = { Text("Correct AURA's answer") },
+                                    text = {
+                                        OutlinedTextField(
+                                            value = correctionDraft,
+                                            onValueChange = { correctionDraft = it },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            minLines = 3,
+                                            maxLines = 8,
+                                            placeholder = { Text("Enter the corrected answer") }
+                                        )
+                                    },
+                                    confirmButton = {
+                                        TextButton(
+                                            onClick = {
+                                                val correction = correctionDraft.trim()
+                                                if (correction.isNotEmpty()) {
+                                                    onFeedback(
+                                                        message.id,
+                                                        ExperienceRecord.Outcome.CORRECTED,
+                                                        correction
+                                                    )
+                                                    showCorrection = false
+                                                }
+                                            },
+                                            enabled = correctionDraft.trim().isNotEmpty()
+                                        ) {
+                                            Text("Save correction")
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showCorrection = false }) {
+                                            Text("Cancel")
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
                         attachments[message.id]?.let { attachment ->
                             Spacer(modifier = Modifier.size(8.dp))
                             Text("📎 " + attachment.name)
