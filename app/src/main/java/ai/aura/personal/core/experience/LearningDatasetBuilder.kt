@@ -85,7 +85,11 @@ object LearningDatasetBuilder {
      * the training payload.
      */
     fun toJsonl(entries: Iterable<LearningDatasetEntry>): String {
-        return entries.joinToString(separator = "\n", postfix = if (entries.any()) "\n" else "") {
+        val items = entries.toList()
+        return items.joinToString(
+            separator = "\n",
+            postfix = if (items.isNotEmpty()) "\n" else ""
+        ) {
             JSONObject()
                 .put("input", it.input)
                 .put("target", it.target)
