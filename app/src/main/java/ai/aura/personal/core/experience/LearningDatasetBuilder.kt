@@ -3,9 +3,8 @@ package ai.aura.personal.core.experience
 /**
  * Converts an approved experience into a minimal learning example.
  *
- * The builder is intentionally strict: an experience becomes training data
- * only after LearningEligibility reports ELIGIBLE. Metadata is kept so the
- * source experience can be audited later without copying unrelated payloads.
+ * Metadata is kept so the source experience can be audited later without
+ * copying unrelated payloads.
  */
 data class LearningDatasetEntry(
     val sourceExperienceId: String,
@@ -23,10 +22,17 @@ object LearningDatasetBuilder {
             return null
         }
 
+        val target = when (record.outcome) {
+            ExperienceRecord.Outcome.CORRECTED -> record.correctedOutput
+            ExperienceRecord.Outcome.SUCCESS -> record.assistantOutput
+            ExperienceRecord.Outcome.UNKNOWN,
+            ExperienceRecord.Outcome.FAILURE -> null
+        } ?: return null
+
         return LearningDatasetEntry(
             sourceExperienceId = record.id,
             input = record.userInput,
-            target = record.assistantOutput,
+            target = target,
             createdAtEpochMs = record.createdAtEpochMs
         )
     }
