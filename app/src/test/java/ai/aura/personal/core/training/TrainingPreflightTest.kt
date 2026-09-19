@@ -13,7 +13,7 @@ class TrainingPreflightTest {
     @Test
     fun consentIsRequired() {
         val base = temporaryFolder.newFile("model.litertlm").apply { writeText("model") }
-        val dataset = temporaryFolder.newFile("data.jsonl").apply { writeText("{"input":"a","target":"b"}") }
+        val dataset = temporaryFolder.newFile("data.jsonl").apply { writeText("""{"input":"a","target":"b"}""") }
         val output = File(temporaryFolder.root, "out")
 
         assertEquals(
