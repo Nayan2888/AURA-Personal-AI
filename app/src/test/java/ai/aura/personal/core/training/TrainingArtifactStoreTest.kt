@@ -29,6 +29,18 @@ class TrainingArtifactStoreTest {
 
         val error = runCatching { store.publish(source, "../v1") }.exceptionOrNull()
 
-        assertEquals("Adapter version must not contain path separators", error?.message)
+        assertEquals("Adapter version contains unsupported characters", error?.message)
+    }
+
+    @Test
+    fun publishedVersionsAreImmutable() {
+        val source = temporaryFolder.newFile("adapter.tmp").apply { writeText("adapter-bytes") }
+        val store = TrainingArtifactStore(temporaryFolder.root)
+
+        store.publish(source, "v1")
+
+        val error = runCatching { store.publish(source, "v1") }.exceptionOrNull()
+
+        assertEquals("Adapter version already exists: v1", error?.message)
     }
 }

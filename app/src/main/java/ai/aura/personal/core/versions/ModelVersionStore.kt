@@ -19,10 +19,17 @@ class ModelVersionStore(
     private val rootDirectory: File
 ) {
     private val manifestFile = File(rootDirectory, "model-versions.properties")
+    private val candidatesDirectory = File(rootDirectory, "training/candidates")
 
     init {
         require(rootDirectory.exists() || rootDirectory.mkdirs() || rootDirectory.isDirectory) {
             "Model version root directory is unavailable"
+        }
+        require(
+            candidatesDirectory.isDirectory ||
+                (candidatesDirectory.mkdirs() && candidatesDirectory.isDirectory)
+        ) {
+            "Candidate artifact directory is unavailable"
         }
     }
 
@@ -31,9 +38,7 @@ class ModelVersionStore(
         require(version.state == ModelVersion.State.CANDIDATE) {
             "Only candidate versions can be registered"
         }
-        require(version.adapterFile?.isFile == true && version.adapterFile.length() > 0L) {
-            "Candidate adapter file must be a non-empty file"
-        }
+        requireCandidateAdapter(version.adapterFile)
 
         val data = loadData()
         require(data.versions.none { it.id == version.id }) {
@@ -53,7 +58,11 @@ class ModelVersionStore(
     @Synchronized
     fun active(): ModelVersion? {
         val data = loadData()
-        return data.activeId?.let { id -> data.versions.firstOrNull { it.id == id } }
+        return data.activeId?.let { id ->
+            data.versions.firstOrNull {
+                it.id == id && it.state == ModelVersion.State.ACTIVE
+            }
+        }
     }
 
     @Synchronized
@@ -78,6 +87,30 @@ class ModelVersionStore(
         }
         if (evaluationReport.baseVersionId.isBlank()) {
             return ActivationResult.REJECTED("Evaluation base version is missing")
+        }
+        requireCandidateAdapter(candidate.adapterFile)
+
+        val currentActive = data.activeId?.let { id ->
+            data.versions.firstOrNull {
+                it.id == id && it.state == ModelVersion.State.ACTIVE
+            }
+        }
+
+        if (currentActive != null) {
+            if (evaluationReport.baseVersionId != currentActive.id) {
+                return ActivationResult.REJECTED(
+                    "Evaluation base version does not match the current active version"
+                )
+            }
+            if (candidate.baseModelId != currentActive.baseModelId) {
+                return ActivationResult.REJECTED(
+                    "Candidate base model does not match the current active model"
+                )
+            }
+        } else if (evaluationReport.baseVersionId != candidate.baseModelId) {
+            return ActivationResult.REJECTED(
+                "Initial evaluation base version must match the candidate base model id"
+            )
         }
 
         val decision = EvaluationGate.check(
@@ -161,7 +194,7 @@ class ModelVersionStore(
             val createdAt = properties.getProperty(prefix + "createdAt")?.toLongOrNull()
                 ?: throw IllegalStateException("Invalid model version timestamp for " + id)
 
-            versions += ModelVersion(
+            val version = ModelVersion(
                 id = id,
                 baseModelId = properties.getProperty(prefix + "baseModelId")
                     ?: throw IllegalStateException("Missing base model id for " + id),
@@ -170,12 +203,41 @@ class ModelVersionStore(
                 evaluationReportId = evaluationReportId,
                 createdAtEpochMs = createdAt
             )
+            if (version.adapterFile != null) {
+                requireStoredAdapter(version.adapterFile)
+            }
+            versions += version
         }
 
         return StoreData(
             activeId = properties.getProperty("activeId")?.takeIf { it.isNotBlank() },
             versions = versions.toMutableList()
         )
+    }
+
+    private fun requireCandidateAdapter(adapterFile: File?) {
+        require(adapterFile?.isFile == true && adapterFile.length() > 0L) {
+            "Candidate adapter file must be a non-empty file"
+        }
+        requireStoredAdapter(adapterFile)
+    }
+
+    private fun requireStoredAdapter(adapterFile: File?) {
+        val file = requireNotNull(adapterFile)
+        val candidatesRoot = runCatching { candidatesDirectory.toPath().toRealPath() }
+            .getOrElse {
+                throw IllegalStateException("Candidate artifact directory is unavailable", it)
+            }
+        val adapterPath = runCatching { file.toPath().toRealPath() }
+            .getOrElse {
+                throw IllegalStateException("Candidate adapter file is unavailable", it)
+            }
+        require(adapterPath.startsWith(candidatesRoot)) {
+            "Candidate adapter file is outside the candidate artifact directory"
+        }
+        require(Files.isRegularFile(adapterPath) && Files.size(adapterPath) > 0L) {
+            "Candidate adapter file must be a non-empty regular file"
+        }
     }
 
     private fun saveData(data: StoreData) {
