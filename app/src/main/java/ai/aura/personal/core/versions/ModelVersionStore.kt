@@ -323,7 +323,7 @@ class ModelVersionStore(
     }
 
     sealed interface RollbackResult {
-        data class ROLLED_BACK(val versionId: String) : ActivationResult
+        data class ROLLED_BACK(val versionId: String) : RollbackResult
         data class REJECTED(val reason: String) : RollbackResult
     }
 }
