@@ -60,9 +60,9 @@ class LearningDatasetStore(context: Context) {
         )
     }
 
-    fun datasetFile(): File = datasetFile.takeIf { it.exists() }
+    fun datasetFile(): File? = datasetFile.takeIf { it.exists() }
 
-    fun manifestFile(): File = manifestFile.takeIf { it.exists() }
+    fun manifestFile(): File? = manifestFile.takeIf { it.exists() }
 
     private fun writeAtomically(target: File, content: String) {
         val temp = File(directory, target.name + ".tmp")
