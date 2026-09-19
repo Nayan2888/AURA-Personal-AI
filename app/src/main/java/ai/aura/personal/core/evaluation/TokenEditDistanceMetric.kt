@@ -44,6 +44,7 @@ class TokenEditDistanceMetric : EvaluationMetric {
             .filter { it.isNotEmpty() }
 
     companion object {
-        private val WHITESPACE_REGEX = Regex("\s+")
+        // Raw Kotlin string keeps the regex backslash intact.
+        private val WHITESPACE_REGEX = Regex("""\s+""")
     }
 }
