@@ -2,6 +2,7 @@ package ai.aura.personal.core.versions
 
 import ai.aura.personal.core.evaluation.EvaluationReport
 import ai.aura.personal.core.evaluation.EvaluationReportStore
+import ai.aura.personal.core.security.ArtifactDigest
 import ai.aura.personal.core.training.TrainingArtifactStore
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -51,6 +52,7 @@ class ModelActivationCoordinatorTest {
                 id = "eval-1",
                 baseVersionId = "base-1",
                 candidateVersionId = "candidate-1",
+                candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
                 evaluatedExampleCount = 2,
                 baseMeanError = 1.0,
                 candidateMeanError = 0.9,
@@ -107,6 +109,7 @@ class ModelActivationCoordinatorTest {
                 id = "eval-1",
                 baseVersionId = "base-1",
                 candidateVersionId = "candidate-1",
+                candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
                 evaluatedExampleCount = 1,
                 baseMeanError = 1.0,
                 candidateMeanError = 0.9,
