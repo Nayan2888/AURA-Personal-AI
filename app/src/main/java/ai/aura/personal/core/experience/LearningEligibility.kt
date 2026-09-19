@@ -3,10 +3,8 @@ package ai.aura.personal.core.experience
 /**
  * Determines whether an experience is safe to promote into future learning data.
  *
- * This gate intentionally requires explicit consent and a verified successful
- * outcome. Corrected, failed, or unknown outcomes are retained as experiences
- * but are not silently promoted into training data because the current record
- * does not yet contain a trusted corrected answer.
+ * Consent is mandatory. Successful answers are eligible directly; corrected
+ * answers are eligible only when a trusted corrected output is present.
  */
 object LearningEligibility {
     fun check(record: ExperienceRecord, consentGranted: Boolean): Result {
@@ -16,8 +14,13 @@ object LearningEligibility {
 
         return when (record.outcome) {
             ExperienceRecord.Outcome.SUCCESS -> Result.ELIGIBLE
-            ExperienceRecord.Outcome.FAILURE -> Result.UNVERIFIED_OUTCOME
-            ExperienceRecord.Outcome.CORRECTED -> Result.REQUIRES_CORRECTED_OUTPUT
+            ExperienceRecord.Outcome.CORRECTED ->
+                if (record.correctedOutput.isNullOrBlank()) {
+                    Result.REQUIRES_CORRECTED_OUTPUT
+                } else {
+                    Result.ELIGIBLE
+                }
+            ExperienceRecord.Outcome.FAILURE,
             ExperienceRecord.Outcome.UNKNOWN -> Result.UNVERIFIED_OUTCOME
         }
     }
