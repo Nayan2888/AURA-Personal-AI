@@ -2,7 +2,9 @@ package ai.aura.personal
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -59,6 +62,17 @@ private fun AuraRoot() {
     var session by remember { mutableStateOf(ChatSession(id = "main-session")) }
     var draft by remember { mutableStateOf("") }
     var menuExpanded by remember { mutableStateOf(false) }
+    var sessionName by remember { mutableStateOf("AURA Chat") }
+    var showSessionInfo by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameDraft by remember { mutableStateOf(sessionName) }
+    var attachedFileName by remember { mutableStateOf<String?>(null) }
+
+    val documentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        attachedFileName = uri?.lastPathSegment?.substringAfterLast('/') ?: uri?.toString()
+    }
 
     fun appendUserMessage(content: String) {
         val cleanContent = content.trim()
@@ -66,21 +80,63 @@ private fun AuraRoot() {
             val message = ChatMessage(
                 id = "message-${session.state.messages.size + 1}",
                 role = ChatMessage.Role.USER,
-                content = cleanContent,
+                content = if (attachedFileName == null) cleanContent else "$cleanContent\n📎 Attachment: $attachedFileName",
                 createdAtEpochMs = System.currentTimeMillis()
             )
             session = session.appendMessage(message)
             draft = ""
+            attachedFileName = null
         }
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
+        if (showSessionInfo) {
+            AlertDialog(
+                onDismissRequest = { showSessionInfo = false },
+                title = { Text("Session info") },
+                text = {
+                    Text(
+                        "Name: $sessionName\nSession ID: ${session.id}\nMessages: ${session.state.messages.size}\nAttachment handling: local picker enabled"
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { showSessionInfo = false }) { Text("Close") }
+                }
+            )
+        }
+
+        if (showRenameDialog) {
+            AlertDialog(
+                onDismissRequest = { showRenameDialog = false },
+                title = { Text("Rename chat") },
+                text = {
+                    OutlinedTextField(
+                        value = renameDraft,
+                        onValueChange = { renameDraft = it },
+                        singleLine = true,
+                        label = { Text("Chat name") }
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            if (renameDraft.trim().isNotEmpty()) sessionName = renameDraft.trim()
+                            showRenameDialog = false
+                        }
+                    ) { Text("Save") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
+                }
+            )
+        }
+
         Scaffold(
             topBar = {
                 TopAppBar(
                     title = {
                         Column {
-                            Text("AURA", style = MaterialTheme.typography.titleLarge)
+                            Text(sessionName, style = MaterialTheme.typography.titleLarge)
                             Text(
                                 "Learn • Assist • Evolve",
                                 style = MaterialTheme.typography.labelSmall,
@@ -100,6 +156,15 @@ private fun AuraRoot() {
                                 text = { Text("New chat") },
                                 onClick = {
                                     session = ChatSession(id = "session-${System.currentTimeMillis()}")
+                                    attachedFileName = null
+                                    menuExpanded = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Rename chat") },
+                                onClick = {
+                                    renameDraft = sessionName
+                                    showRenameDialog = true
                                     menuExpanded = false
                                 }
                             )
@@ -107,12 +172,16 @@ private fun AuraRoot() {
                                 text = { Text("Clear conversation") },
                                 onClick = {
                                     session = ChatSession(id = session.id)
+                                    attachedFileName = null
                                     menuExpanded = false
                                 }
                             )
                             DropdownMenuItem(
                                 text = { Text("Session info") },
-                                onClick = { menuExpanded = false }
+                                onClick = {
+                                    showSessionInfo = true
+                                    menuExpanded = false
+                                }
                             )
                         }
                     }
@@ -126,27 +195,49 @@ private fun AuraRoot() {
                         .imePadding()
                         .navigationBarsPadding()
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.Bottom,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
-                        OutlinedTextField(
-                            value = draft,
-                            onValueChange = { draft = it },
-                            modifier = Modifier.weight(1f),
-                            minLines = 1,
-                            maxLines = 4,
-                            placeholder = { Text("Message AURA…") }
-                        )
-                        Button(
-                            onClick = { appendUserMessage(draft) },
-                            enabled = draft.isNotBlank(),
-                            modifier = Modifier.padding(bottom = 2.dp)
+                        if (attachedFileName != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("📎 $attachedFileName", modifier = Modifier.weight(1f))
+                                TextButton(onClick = { attachedFileName = null }) { Text("Remove") }
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Bottom,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("➤")
+                            TextButton(
+                                onClick = {
+                                    documentPicker.launch(arrayOf("image/*", "application/pdf", "text/*", "application/octet-stream"))
+                                },
+                                modifier = Modifier.padding(bottom = 2.dp)
+                            ) {
+                                Text("＋")
+                            }
+                            OutlinedTextField(
+                                value = draft,
+                                onValueChange = { draft = it },
+                                modifier = Modifier.weight(1f),
+                                minLines = 1,
+                                maxLines = 4,
+                                placeholder = { Text("Message AURA…") }
+                            )
+                            Button(
+                                onClick = { appendUserMessage(draft) },
+                                enabled = draft.isNotBlank(),
+                                modifier = Modifier.padding(bottom = 2.dp)
+                            ) {
+                                Text("➤")
+                            }
                         }
                     }
                 }
