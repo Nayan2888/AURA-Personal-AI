@@ -19,7 +19,9 @@ class ExecuTorchTrainingSession(
 
     private var module: TrainingModule? = null
     private var optimizer: SGD? = null
+    private var activeSpec: LoraTrainingSpec? = null
 
+    @Synchronized
     fun initialize(spec: LoraTrainingSpec) {
         check(trainingModelFile.isFile) {
             "ExecuTorch training model does not exist: ${trainingModelFile.absolutePath}"
@@ -28,7 +30,12 @@ class ExecuTorchTrainingSession(
             "ExecuTorch training model is empty: ${trainingModelFile.absolutePath}"
         }
 
-        if (module != null) return
+        module?.let {
+            check(activeSpec == spec) {
+                "Training session is already initialized with a different specification."
+            }
+            return
+        }
 
         val loaded = TrainingModule.load(trainingModelFile.absolutePath)
         try {
@@ -38,16 +45,26 @@ class ExecuTorchTrainingSession(
             }
             optimizer = SGD.create(parameters, spec.learningRate)
             module = loaded
+            activeSpec = spec
         } catch (error: Throwable) {
             runCatching { loaded.close() }
             throw error
         }
     }
 
+    /**
+     * Runs one forward/backward training step and applies one optimizer update.
+     * LLM fine-tuning normally supplies two inputs: token IDs and labels.
+     */
+    @Synchronized
     fun trainStep(
-        inputs: EValue,
+        vararg inputs: EValue,
         methodName: String = "forward"
     ): Float {
+        require(inputs.isNotEmpty()) {
+            "Training step requires at least one input."
+        }
+
         val activeModule = checkNotNull(module) {
             "Training session is not initialized."
         }
@@ -55,7 +72,7 @@ class ExecuTorchTrainingSession(
             "Training optimizer is not initialized."
         }
 
-        val outputs = activeModule.executeForwardBackward(methodName, inputs)
+        val outputs = activeModule.executeForwardBackward(methodName, *inputs)
         check(outputs.isNotEmpty()) {
             "Training module returned no outputs."
         }
@@ -79,17 +96,21 @@ class ExecuTorchTrainingSession(
         return lossValues[0]
     }
 
+    @Synchronized
     fun namedParameters(methodName: String = "forward"): Map<String, Tensor> =
         checkNotNull(module) { "Training session is not initialized." }
             .namedParameters(methodName)
 
+    @Synchronized
     fun namedGradients(methodName: String = "forward"): Map<String, Tensor> =
         checkNotNull(module) { "Training session is not initialized." }
             .namedGradients(methodName)
 
+    @Synchronized
     override fun close() {
         optimizer = null
         module?.close()
         module = null
+        activeSpec = null
     }
 }

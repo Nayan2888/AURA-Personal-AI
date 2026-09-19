@@ -5,13 +5,12 @@ import java.io.File
 /**
  * Contract for a real on-device LoRA trainer.
  *
- * No implementation is registered until the backend demonstrably supports
- * language-model adapter training for the selected base model. This prevents
- * the app from reporting a fake "training complete" state.
+ * The training artifact is a dedicated ExecuTorch training model (.pte, optionally
+ * accompanied by external data), not the active LiteRT-LM inference .litertlm file.
  */
 interface OnDeviceLoraTrainingEngine {
     suspend fun train(
-        baseModel: File,
+        trainingModel: File,
         dataset: File,
         outputDirectory: File,
         spec: LoraTrainingSpec,

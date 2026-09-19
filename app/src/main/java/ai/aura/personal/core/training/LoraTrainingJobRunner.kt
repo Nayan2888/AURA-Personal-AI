@@ -14,7 +14,7 @@ class LoraTrainingJobRunner(
 ) {
 
     suspend fun run(
-        baseModel: File,
+        trainingModel: File,
         dataset: File,
         outputDirectory: File,
         spec: LoraTrainingSpec,
@@ -24,7 +24,7 @@ class LoraTrainingJobRunner(
         when (
             val preflight = TrainingPreflight.check(
                 consentGranted = consentGranted,
-                baseModel = baseModel,
+                trainingModel = trainingModel,
                 dataset = dataset,
                 outputDirectory = outputDirectory,
                 spec = spec
@@ -33,8 +33,8 @@ class LoraTrainingJobRunner(
             TrainingPreflight.Result.READY -> Unit
             TrainingPreflight.Result.NOT_CONSENTED ->
                 return Result.Rejected("Training consent is required.")
-            TrainingPreflight.Result.INVALID_BASE_MODEL ->
-                return Result.Rejected("Base model is missing or empty.")
+            TrainingPreflight.Result.INVALID_TRAINING_MODEL ->
+                return Result.Rejected("Training model is missing or empty.")
             TrainingPreflight.Result.INVALID_DATASET ->
                 return Result.Rejected("Training dataset is missing or empty.")
             TrainingPreflight.Result.INVALID_OUTPUT_DIRECTORY ->
@@ -45,7 +45,7 @@ class LoraTrainingJobRunner(
 
         return when (
             val training = trainingEngine.train(
-                baseModel = baseModel,
+                trainingModel = trainingModel,
                 dataset = dataset,
                 outputDirectory = outputDirectory,
                 spec = spec,
@@ -65,15 +65,20 @@ class LoraTrainingJobRunner(
                         return Result.Failed("Training backend returned an adapter outside its output directory.")
                 }
 
+                val normalizedVersion = adapterVersion.trim()
+                if (normalizedVersion.isEmpty()) {
+                    return Result.Failed("Candidate adapter version must not be blank.")
+                }
+
                 val published = runCatching {
-                    artifactStore.publish(training.adapterFile, adapterVersion)
+                    artifactStore.publish(training.adapterFile, normalizedVersion)
                 }.getOrElse { error ->
                     return Result.Failed("Candidate adapter publish failed.", error)
                 }
 
                 Result.Success(
                     adapterFile = published,
-                    adapterVersion = training.adapterVersion
+                    adapterVersion = normalizedVersion
                 )
             }
         }

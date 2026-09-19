@@ -1,7 +1,6 @@
 package ai.aura.personal.core.training
 
 import java.io.File
-import java.nio.file.Path
 
 /**
  * Verifies that a trainer returned a concrete adapter artifact inside the job's

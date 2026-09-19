@@ -10,13 +10,15 @@ import java.io.File
 object TrainingPreflight {
     fun check(
         consentGranted: Boolean,
-        baseModel: File,
+        trainingModel: File,
         dataset: File,
         outputDirectory: File,
         spec: LoraTrainingSpec
     ): Result {
         if (!consentGranted) return Result.NOT_CONSENTED
-        if (!baseModel.isFile || baseModel.length() <= 0L) return Result.INVALID_BASE_MODEL
+        if (!trainingModel.isFile || trainingModel.length() <= 0L) {
+            return Result.INVALID_TRAINING_MODEL
+        }
         if (!dataset.isFile || dataset.length() <= 0L) return Result.INVALID_DATASET
         if (outputDirectory.exists() && !outputDirectory.isDirectory) {
             return Result.INVALID_OUTPUT_DIRECTORY
@@ -31,7 +33,7 @@ object TrainingPreflight {
     enum class Result {
         READY,
         NOT_CONSENTED,
-        INVALID_BASE_MODEL,
+        INVALID_TRAINING_MODEL,
         INVALID_DATASET,
         INVALID_OUTPUT_DIRECTORY,
         OUTPUT_DIRECTORY_UNAVAILABLE
