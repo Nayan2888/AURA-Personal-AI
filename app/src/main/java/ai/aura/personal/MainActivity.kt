@@ -1,6 +1,7 @@
 package ai.aura.personal
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -55,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.chat.ChatSession
+import ai.aura.personal.core.history.ChatHistoryStore
 
 private data class SelectedAttachment(
     val uri: Uri,
@@ -62,14 +64,8 @@ private data class SelectedAttachment(
     val mimeType: String
 )
 
-private fun resolveDisplayName(context: Context, uri: Uri): String {
-    context.contentResolver.query(
-        uri,
-        arrayOf(OpenableColumns.DISPLAY_NAME),
-        null,
-        null,
-        null
-    )?.use { cursor ->
+private fun displayName(context: Context, uri: Uri): String {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
         val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
         if (index >= 0 && cursor.moveToFirst()) return cursor.getString(index)
     }
@@ -87,91 +83,99 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AuraRoot() {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var session by remember { mutableStateOf(ChatSession(id = "main-session")) }
-    var draft by remember { mutableStateOf("") }
-    var menuExpanded by remember { mutableStateOf(false) }
+    val historyStore = remember { ChatHistoryStore(context) }
+    var session by remember { mutableStateOf(ChatSession("main-session")) }
     var sessionName by remember { mutableStateOf("AURA Chat") }
-    var showSessionInfo by remember { mutableStateOf(false) }
-    var showRenameDialog by remember { mutableStateOf(false) }
-    var renameDraft by remember { mutableStateOf("AURA Chat") }
+    var draft by remember { mutableStateOf("") }
     var selectedAttachment by remember { mutableStateOf<SelectedAttachment?>(null) }
     var selectedSection by remember { mutableStateOf(0) }
-    val messageAttachments = remember { mutableStateMapOf<String, SelectedAttachment>() }
+    var menuExpanded by remember { mutableStateOf(false) }
+    var showInfo by remember { mutableStateOf(false) }
+    var showRename by remember { mutableStateOf(false) }
+    var renameDraft by remember { mutableStateOf("") }
+    var history by remember { mutableStateOf(historyStore.list()) }
+    val attachments = remember { mutableStateMapOf<String, SelectedAttachment>() }
 
-    val documentPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri ->
+    fun refreshHistory() {
+        history = historyStore.list()
+    }
+
+    fun saveCurrentSession() {
+        if (session.state.messages.isNotEmpty()) {
+            historyStore.save(session, sessionName)
+            refreshHistory()
+        }
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             } catch (_: SecurityException) {
-                // The provider may not support persistable permissions.
+                // Some providers do not offer persistable permissions.
             }
             selectedAttachment = SelectedAttachment(
                 uri = uri,
-                name = resolveDisplayName(context, uri),
+                name = displayName(context, uri),
                 mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
             )
         }
     }
 
-    fun appendUserMessage() {
-        val cleanContent = draft.trim()
+    fun sendMessage() {
+        val text = draft.trim()
         val attachment = selectedAttachment
-        if (cleanContent.isNotEmpty() || attachment != null) {
-            val messageId = "message-${session.state.messages.size + 1}"
-            session = session.appendMessage(
-                ChatMessage(
-                    id = messageId,
-                    role = ChatMessage.Role.USER,
-                    content = cleanContent.ifEmpty { "Attachment" },
-                    createdAtEpochMs = System.currentTimeMillis()
-                )
+        if (text.isEmpty() && attachment == null) return
+        val messageId = "message-${session.state.messages.size + 1}"
+        val updated = session.appendMessage(
+            ChatMessage(
+                id = messageId,
+                role = ChatMessage.Role.USER,
+                content = text.ifEmpty { "Attachment" },
+                createdAtEpochMs = System.currentTimeMillis()
             )
-            if (attachment != null) messageAttachments[messageId] = attachment
-            draft = ""
-            selectedAttachment = null
-        }
+        )
+        session = updated
+        if (attachment != null) attachments[messageId] = attachment
+        historyStore.save(updated, sessionName)
+        refreshHistory()
+        draft = ""
+        selectedAttachment = null
+    }
+
+    fun openHistory(id: String) {
+        val restored = historyStore.load(id) ?: return
+        session = restored
+        history.firstOrNull { it.id == id }?.let { sessionName = it.title }
+        attachments.clear()
+        selectedSection = 0
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
-        if (showSessionInfo) {
+        if (showInfo) {
             AlertDialog(
-                onDismissRequest = { showSessionInfo = false },
+                onDismissRequest = { showInfo = false },
                 title = { Text("Session info") },
-                text = {
-                    Text("Name: $sessionName\nSession ID: ${session.id}\nMessages: ${session.state.messages.size}")
-                },
-                confirmButton = {
-                    TextButton(onClick = { showSessionInfo = false }) { Text("Close") }
-                }
+                text = { Text("Name: $sessionName\nSession ID: ${session.id}\nMessages: ${session.state.messages.size}") },
+                confirmButton = { TextButton(onClick = { showInfo = false }) { Text("Close") } }
             )
         }
-
-        if (showRenameDialog) {
+        if (showRename) {
             AlertDialog(
-                onDismissRequest = { showRenameDialog = false },
+                onDismissRequest = { showRename = false },
                 title = { Text("Rename chat") },
-                text = {
-                    OutlinedTextField(
-                        value = renameDraft,
-                        onValueChange = { renameDraft = it },
-                        singleLine = true,
-                        label = { Text("Chat name") }
-                    )
-                },
+                text = { OutlinedTextField(value = renameDraft, onValueChange = { renameDraft = it }, singleLine = true) },
                 confirmButton = {
                     TextButton(onClick = {
-                        if (renameDraft.trim().isNotEmpty()) sessionName = renameDraft.trim()
-                        showRenameDialog = false
+                        if (renameDraft.trim().isNotEmpty()) {
+                            sessionName = renameDraft.trim()
+                            historyStore.rename(session.id, sessionName)
+                            refreshHistory()
+                        }
+                        showRename = false
                     }) { Text("Save") }
                 },
-                dismissButton = {
-                    TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
-                }
+                dismissButton = { TextButton(onClick = { showRename = false }) { Text("Cancel") } }
             )
         }
 
@@ -185,85 +189,48 @@ private fun AuraRoot() {
                         }
                     },
                     actions = {
-                        TextButton(onClick = { menuExpanded = true }) {
-                            Text("⋮", style = MaterialTheme.typography.headlineSmall)
-                        }
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("New chat") },
-                                onClick = {
-                                    session = ChatSession(id = "session-${System.currentTimeMillis()}")
-                                    selectedAttachment = null
-                                    messageAttachments.clear()
-                                    menuExpanded = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Rename chat") },
-                                onClick = {
-                                    renameDraft = sessionName
-                                    showRenameDialog = true
-                                    menuExpanded = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Clear conversation") },
-                                onClick = {
-                                    session = ChatSession(id = session.id)
-                                    selectedAttachment = null
-                                    messageAttachments.clear()
-                                    menuExpanded = false
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Session info") },
-                                onClick = {
-                                    showSessionInfo = true
-                                    menuExpanded = false
-                                }
-                            )
+                        TextButton(onClick = { menuExpanded = true }) { Text("⋮", style = MaterialTheme.typography.headlineSmall) }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(text = { Text("New chat") }, onClick = {
+                                saveCurrentSession()
+                                session = ChatSession("session-${System.currentTimeMillis()}")
+                                sessionName = "AURA Chat"
+                                attachments.clear()
+                                selectedAttachment = null
+                                menuExpanded = false
+                            })
+                            DropdownMenuItem(text = { Text("Rename chat") }, onClick = {
+                                renameDraft = sessionName
+                                showRename = true
+                                menuExpanded = false
+                            })
+                            DropdownMenuItem(text = { Text("Clear conversation") }, onClick = {
+                                session = ChatSession(session.id)
+                                attachments.clear()
+                                selectedAttachment = null
+                                menuExpanded = false
+                            })
+                            DropdownMenuItem(text = { Text("Session info") }, onClick = {
+                                showInfo = true
+                                menuExpanded = false
+                            })
                         }
                     }
                 )
             },
             bottomBar = {
-                Surface(
-                    tonalElevation = 8.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .imePadding()
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
+                Surface(tonalElevation = 8.dp, modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
+                    Column {
+                        Column(modifier = Modifier.fillMaxWidth().imePadding().padding(12.dp)) {
                             selectedAttachment?.let { attachment ->
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = 8.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                                ) {
+                                Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                                     Column(modifier = Modifier.padding(10.dp)) {
                                         Text("📎 ${attachment.name}")
                                         if (attachment.mimeType.startsWith("image/")) {
                                             AndroidView(
-                                                factory = { ImageView(it).apply {
-                                                    scaleType = ImageView.ScaleType.CENTER_CROP
-                                                    adjustViewBounds = true
-                                                } },
+                                                factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.CENTER_CROP; adjustViewBounds = true } },
                                                 update = { it.setImageURI(attachment.uri) },
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(150.dp)
-                                                    .padding(top = 8.dp)
-                                                    .clip(RoundedCornerShape(12.dp))
+                                                modifier = Modifier.fillMaxWidth().height(140.dp).padding(top = 8.dp).clip(RoundedCornerShape(10.dp))
                                             )
                                         }
                                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -272,121 +239,98 @@ private fun AuraRoot() {
                                     }
                                 }
                             }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Bottom,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                TextButton(onClick = {
-                                    documentPicker.launch(arrayOf("image/*", "application/pdf", "text/*", "application/octet-stream"))
-                                }) { Text("＋", style = MaterialTheme.typography.headlineSmall) }
-
-                                OutlinedTextField(
-                                    value = draft,
-                                    onValueChange = { draft = it },
-                                    modifier = Modifier.weight(1f),
-                                    minLines = 1,
-                                    maxLines = 4,
-                                    placeholder = { Text("Message AURA…") }
-                                )
-
-                                TextButton(
-                                    onClick = { appendUserMessage() },
-                                    enabled = draft.isNotBlank() || selectedAttachment != null
-                                ) { Text("➤", style = MaterialTheme.typography.headlineSmall) }
+                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = { picker.launch(arrayOf("image/*", "application/pdf", "text/*", "application/octet-stream")) }) { Text("＋", style = MaterialTheme.typography.headlineSmall) }
+                                OutlinedTextField(value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f), minLines = 1, maxLines = 4, placeholder = { Text("Message AURA…") })
+                                TextButton(onClick = { sendMessage() }, enabled = draft.isNotBlank() || selectedAttachment != null) { Text("➤", style = MaterialTheme.typography.headlineSmall) }
                             }
                         }
-
                         NavigationBar {
                             val labels = listOf("Chat", "Tools", "Memory", "Skills", "Settings")
                             val icons = listOf("⌂", "▦", "◉", "◆", "⚙")
                             labels.forEachIndexed { index, label ->
-                                NavigationBarItem(
-                                    selected = selectedSection == index,
-                                    onClick = { selectedSection = index },
-                                    icon = { Text(icons[index]) },
-                                    label = { Text(label) }
-                                )
+                                NavigationBarItem(selected = selectedSection == index, onClick = { selectedSection = index; if (index == 2) refreshHistory() }, icon = { Text(icons[index]) }, label = { Text(label) })
                             }
                         }
                     }
                 }
             }
         ) { paddingValues ->
-            Surface(
-                modifier = Modifier.fillMaxSize().padding(paddingValues),
-                color = MaterialTheme.colorScheme.background
-            ) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text("AURA is ready", style = MaterialTheme.typography.titleMedium)
-                                Spacer(modifier = Modifier.size(4.dp))
-                                Text("Your conversation workspace. Real model, research, tools and learning will connect through this interface.")
-                            }
-                        }
-                    }
+            Surface(modifier = Modifier.fillMaxSize().padding(paddingValues), color = MaterialTheme.colorScheme.background) {
+                if (selectedSection == 2) {
+                    HistoryScreen(history = history, onOpen = ::openHistory, onDelete = { id -> historyStore.delete(id); refreshHistory() })
+                } else {
+                    ChatScreen(session = session, attachments = attachments)
+                }
+            }
+        }
+    }
+}
 
-                    if (session.state.messages.isEmpty()) {
-                        item { Text("What would you like to do?", style = MaterialTheme.typography.titleMedium) }
-                        item {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                TextButton(onClick = { draft = "मुझे कुछ नया सिखाओ" }) { Text("📚 Learn") }
-                                TextButton(onClick = { draft = "मेरे लिए एक काम की योजना बनाओ" }) { Text("🔧 Plan a task") }
-                                TextButton(onClick = { draft = "वेब पर कुछ खोजो" }) { Text("🌐 Research") }
-                                TextButton(onClick = { draft = "मेरी saved memory दिखाओ" }) { Text("🧠 Memory") }
-                            }
-                        }
-                    }
-
-                    items(session.state.messages, key = { it.id }) { message ->
-                        val isUser = message.role == ChatMessage.Role.USER
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
-                        ) {
-                            Card(
-                                modifier = Modifier.fillMaxWidth(0.88f),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isUser) Color(0xFF304FFE) else MaterialTheme.colorScheme.surfaceVariant
+@Composable
+private fun ChatScreen(session: ChatSession, attachments: Map<String, SelectedAttachment>) {
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item {
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("AURA is ready", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.size(4.dp))
+                    Text("Your conversation workspace. Real model, research, tools and learning will connect through this interface.")
+                }
+            }
+        }
+        if (session.state.messages.isEmpty()) {
+            item { Text("What would you like to do?", style = MaterialTheme.typography.titleMedium) }
+            item {
+                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {}) { Text("📚 Learn") }
+                    TextButton(onClick = {}) { Text("🔧 Plan a task") }
+                    TextButton(onClick = {}) { Text("🌐 Research") }
+                    TextButton(onClick = {}) { Text("🧠 Memory") }
+                }
+            }
+        }
+        items(session.state.messages, key = { it.id }) { message ->
+            val isUser = message.role == ChatMessage.Role.USER
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start) {
+                Card(modifier = Modifier.fillMaxWidth(0.88f), colors = CardDefaults.cardColors(containerColor = if (isUser) Color(0xFF304FFE) else MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(if (isUser) "YOU" else "AURA", style = MaterialTheme.typography.labelSmall)
+                        Spacer(modifier = Modifier.size(4.dp))
+                        Text(message.content)
+                        attachments[message.id]?.let { attachment ->
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Text("📎 ${attachment.name}")
+                            if (attachment.mimeType.startsWith("image/")) {
+                                AndroidView(
+                                    factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.CENTER_CROP; adjustViewBounds = true } },
+                                    update = { it.setImageURI(attachment.uri) },
+                                    modifier = Modifier.fillMaxWidth().height(180.dp).padding(top = 6.dp).clip(RoundedCornerShape(10.dp))
                                 )
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Text(if (isUser) "YOU" else "AURA", style = MaterialTheme.typography.labelSmall)
-                                    Spacer(modifier = Modifier.size(4.dp))
-                                    Text(message.content)
-                                    messageAttachments[message.id]?.let { attachment ->
-                                        Spacer(modifier = Modifier.size(8.dp))
-                                        Text("📎 ${attachment.name}")
-                                        if (attachment.mimeType.startsWith("image/")) {
-                                            AndroidView(
-                                                factory = { ImageView(it).apply {
-                                                    scaleType = ImageView.ScaleType.CENTER_CROP
-                                                    adjustViewBounds = true
-                                                } },
-                                                update = { it.setImageURI(attachment.uri) },
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(190.dp)
-                                                    .padding(top = 6.dp)
-                                                    .clip(RoundedCornerShape(10.dp))
-                                            )
-                                        }
-                                    }
-                                }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryScreen(history: List<ChatHistoryStore.HistorySummary>, onOpen: (String) -> Unit, onDelete: (String) -> Unit) {
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { Text("Chat History", style = MaterialTheme.typography.headlineSmall) }
+        if (history.isEmpty()) {
+            item { Text("अभी कोई saved conversation नहीं है।") }
+        }
+        items(history, key = { it.id }) { item ->
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(item.title, style = MaterialTheme.typography.titleMedium)
+                    Text("${item.messageCount} messages", style = MaterialTheme.typography.bodySmall)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { onOpen(item.id) }) { Text("Open") }
+                        TextButton(onClick = { onDelete(item.id) }) { Text("Delete") }
                     }
                 }
             }
