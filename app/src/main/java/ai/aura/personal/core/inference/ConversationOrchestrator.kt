@@ -1,6 +1,7 @@
 package ai.aura.personal.core.inference
 
 import ai.aura.personal.core.chat.ChatMessage
+import java.io.File
 
 /**
  * Coordinates a user turn with the configured assistant engine.
@@ -11,7 +12,8 @@ class ConversationOrchestrator(
 ) {
     suspend fun respond(
         history: List<ChatMessage>,
-        userMessage: ChatMessage
+        userMessage: ChatMessage,
+        loraAdapterFile: File? = null
     ): ChatMessage {
         require(userMessage.role == ChatMessage.Role.USER) {
             "ConversationOrchestrator requires a USER message."
@@ -19,7 +21,8 @@ class ConversationOrchestrator(
 
         val output = engine.generate(
             history = history,
-            userInput = userMessage.content
+            userInput = userMessage.content,
+            loraAdapterFile = loraAdapterFile
         )
 
         return ChatMessage(
