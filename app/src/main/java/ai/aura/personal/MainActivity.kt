@@ -70,6 +70,7 @@ import ai.aura.personal.core.experience.ExperienceStore
 import ai.aura.personal.core.experience.LearningConsentStore
 import ai.aura.personal.core.experience.LearningDatasetStore
 import ai.aura.personal.core.inference.LocalModelStore
+import ai.aura.personal.core.knowledge.LearnedKnowledgeStore
 import ai.aura.personal.core.navigation.AuraDestination
 import ai.aura.personal.core.research.AndroidResearchAccessController
 import ai.aura.personal.core.research.ResearchConsentStore
@@ -111,6 +112,7 @@ private fun AuraRoot() {
     val experienceStore = remember { ExperienceStore(context) }
     val learningConsentStore = remember { LearningConsentStore(context) }
     val learningDatasetStore = remember { LearningDatasetStore(context) }
+    val learnedKnowledgeStore = remember { LearnedKnowledgeStore(context.filesDir) }
     val researchConsentStore = remember { ResearchConsentStore(context) }
     val researchAccessController = remember {
         AndroidResearchAccessController(
@@ -126,7 +128,9 @@ private fun AuraRoot() {
         AssistantRuntimeManager(
             modelVersionStore = modelVersionStore,
             evaluationReportStore = evaluationReportStore,
-            researchProvider = researchProvider
+            researchProvider = researchProvider,
+            learnedKnowledgeStore = learnedKnowledgeStore,
+            learningConsentStore = learningConsentStore
         )
     }
     val scope = rememberCoroutineScope()
