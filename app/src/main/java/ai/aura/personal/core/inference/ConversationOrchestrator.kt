@@ -85,13 +85,15 @@ class ConversationOrchestrator(
         }
 
         val evidence = ResearchContextFormatter.format(research.sources)
-        learningConsentStore?.let { consentStore ->
-            learnedKnowledgeStore?.remember(
-                query = userMessage.content,
-                sources = research.sources,
-                consentGranted = consentStore.isGranted(),
-                learnedAtEpochMs = System.currentTimeMillis()
-            )
+        if (learningConsentStore?.isGranted() == true) {
+            runCatching {
+                learnedKnowledgeStore?.remember(
+                    query = userMessage.content,
+                    sources = research.sources,
+                    consentGranted = true,
+                    learnedAtEpochMs = System.currentTimeMillis()
+                )
+            }
         }
 
         val groundedOutput = engine.generate(
