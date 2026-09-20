@@ -2,6 +2,8 @@ package ai.aura.personal.core.inference
 
 import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.evaluation.EvaluationReportStore
+import ai.aura.personal.core.experience.LearningConsentStore
+import ai.aura.personal.core.knowledge.LearnedKnowledgeStore
 import ai.aura.personal.core.research.ResearchProvider
 import ai.aura.personal.core.security.ArtifactDigest
 import ai.aura.personal.core.versions.ModelVersionStore
@@ -21,7 +23,9 @@ class AssistantRuntimeManager(
     private val modelVersionStore: ModelVersionStore? = null,
     private val evaluationReportStore: EvaluationReportStore? = null,
     private val engineFactory: (File) -> AssistantEngine = { LiteRtLmAssistantEngine(it) },
-    private val researchProvider: ResearchProvider? = null
+    private val researchProvider: ResearchProvider? = null,
+    private val learnedKnowledgeStore: LearnedKnowledgeStore? = null,
+    private val learningConsentStore: LearningConsentStore? = null
 ) : AutoCloseable {
 
     private var engine: AssistantEngine? = null
@@ -112,7 +116,9 @@ class AssistantRuntimeManager(
 
                 ConversationOrchestrator(
                     engine = activeEngine,
-                    researchProvider = researchProvider
+                    researchProvider = researchProvider,
+                    learnedKnowledgeStore = learnedKnowledgeStore,
+                    learningConsentStore = learningConsentStore
                 ).respond(
                     history = history,
                     userMessage = userMessage,
