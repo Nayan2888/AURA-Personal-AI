@@ -26,7 +26,8 @@ class AssistantRuntimeManagerTest {
     val temporaryFolder = TemporaryFolder()
 
     @Test
-    fun noActiveVersionRunsBaseModelWithoutAdapter() = runBlocking {
+    fun noActiveVersionRunsBaseModelWithoutAdapter() {
+        runBlocking {
         val root = temporaryFolder.newFolder("base-only")
         val reports = EvaluationReportStore(root)
         val versions = ModelVersionStore(root)
@@ -46,10 +47,12 @@ class AssistantRuntimeManagerTest {
         assertNull(runtime.loadedActiveVersionId())
         assertEquals(1, engines.size)
         assertTrue(engines.single().initialized)
+        }
     }
 
     @Test
-    fun activeVersionAdapterIsPinnedIntoRuntime() = runBlocking {
+    fun activeVersionAdapterIsPinnedIntoRuntime() {
+        runBlocking {
         val root = temporaryFolder.newFolder("active")
         val reports = EvaluationReportStore(root)
         val versions = ModelVersionStore(root)
@@ -76,10 +79,12 @@ class AssistantRuntimeManagerTest {
         assertEquals("adapter:" + adapter.name, response.content)
         assertEquals("candidate-1", runtime.loadedActiveVersionId())
         assertEquals(adapter, engines.single().lastAdapter)
+        }
     }
 
     @Test
-    fun activationChangeAutomaticallyReloadsRuntimeOnNextResponse() = runBlocking {
+    fun activationChangeAutomaticallyReloadsRuntimeOnNextResponse() {
+        runBlocking {
         val root = temporaryFolder.newFolder("switch")
         val reports = EvaluationReportStore(root)
         val versions = ModelVersionStore(root)
@@ -122,10 +127,12 @@ class AssistantRuntimeManagerTest {
         assertSame(engines[1], engines.last())
         assertEquals(secondAdapter, engines.last().lastAdapter)
         assertTrue(firstAdapter.exists())
+        }
     }
 
     @Test
-    fun tamperedActiveAdapterIsRejectedBeforeInference() = runBlocking {
+    fun tamperedActiveAdapterIsRejectedBeforeInference() {
+        runBlocking {
         val root = temporaryFolder.newFolder("tamper")
         val reports = EvaluationReportStore(root)
         val versions = ModelVersionStore(root)
@@ -149,6 +156,7 @@ class AssistantRuntimeManagerTest {
             runBlocking {
                 runtime.respond(emptyList(), userMessage("tamper"))
             }
+        }
         }
     }
 
