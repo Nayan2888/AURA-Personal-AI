@@ -5,6 +5,8 @@ import ai.aura.personal.core.evaluation.EvaluationReportStore
 import ai.aura.personal.core.security.ArtifactDigest
 import ai.aura.personal.core.versions.ModelVersionStore
 import java.io.File
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Owns the currently selected local model runtime.
@@ -26,21 +28,60 @@ class AssistantRuntimeManager(
     private var loadedAdapterFile: File? = null
     private var loadedAdapterSha256: String? = null
 
-    suspend fun load(modelFile: File) {
-        val selection = readActiveSelection(modelFile)
+    /**
+     * Serializes runtime lifecycle and generation so a model cannot be closed
+     * or replaced while an inference call is using it.
+     */
+    private val lifecycleMutex = Mutex()
 
-        close()
-        val newEngine = engineFactory(modelFile)
+    /**
+     * Tracks callers that have entered a lifecycle operation, including callers
+     * waiting for lifecycleMutex. This lets synchronous close() defer destruction
+     * safely until those operations finish.
+     */
+    private var activeOperations = 0
+    private var closeRequested = false
+    private val operationStateLock = Any()
+
+    private fun beginOperation() {
+        synchronized(operationStateLock) {
+            activeOperations += 1
+        }
+    }
+
+    private fun endOperation() {
+        synchronized(operationStateLock) {
+            activeOperations -= 1
+            check(activeOperations >= 0) { "Runtime operation count underflow." }
+            if (activeOperations == 0 && closeRequested) {
+                closeRequested = false
+                closeInternal()
+            }
+        }
+    }
+
+    suspend fun load(modelFile: File) {
+        beginOperation()
         try {
-            newEngine.initialize()
-            engine = newEngine
-            loadedModelFile = modelFile
-            loadedActiveVersionId = selection?.versionId
-            loadedAdapterFile = selection?.adapterFile
-            loadedAdapterSha256 = selection?.adapterSha256
-        } catch (error: Throwable) {
-            newEngine.close()
-            throw error
+            lifecycleMutex.withLock {
+                val selection = readActiveSelection(modelFile)
+
+                closeInternal()
+                val newEngine = engineFactory(modelFile)
+                try {
+                    newEngine.initialize()
+                    engine = newEngine
+                    loadedModelFile = modelFile
+                    loadedActiveVersionId = selection?.versionId
+                    loadedAdapterFile = selection?.adapterFile
+                    loadedAdapterSha256 = selection?.adapterSha256
+                } catch (error: Throwable) {
+                    newEngine.close()
+                    throw error
+                }
+            }
+        } finally {
+            endOperation()
         }
     }
 
@@ -51,24 +92,31 @@ class AssistantRuntimeManager(
         userMessage: ChatMessage,
         loraAdapterFile: File? = null
     ): ChatMessage {
-        ensureRuntimeMatchesActiveVersion()
+        beginOperation()
+        try {
+            return lifecycleMutex.withLock {
+                ensureRuntimeMatchesActiveVersion()
 
-        val activeEngine = checkNotNull(engine) {
-            "No local model is installed. Import a .litertlm model first."
+                val activeEngine = checkNotNull(engine) {
+                    "No local model is installed. Import a .litertlm model first."
+                }
+
+                val pinnedAdapter = loadedAdapterFile
+                if (loraAdapterFile != null && !sameFile(loraAdapterFile, pinnedAdapter)) {
+                    throw IllegalArgumentException(
+                        "Direct LoRA adapter injection is not allowed unless it is the active version."
+                    )
+                }
+
+                ConversationOrchestrator(activeEngine).respond(
+                    history = history,
+                    userMessage = userMessage,
+                    loraAdapterFile = pinnedAdapter
+                )
+            }
+        } finally {
+            endOperation()
         }
-
-        val pinnedAdapter = loadedAdapterFile
-        if (loraAdapterFile != null && !sameFile(loraAdapterFile, pinnedAdapter)) {
-            throw IllegalArgumentException(
-                "Direct LoRA adapter injection is not allowed unless it is the active version."
-            )
-        }
-
-        return ConversationOrchestrator(activeEngine).respond(
-            history = history,
-            userMessage = userMessage,
-            loraAdapterFile = pinnedAdapter
-        )
     }
 
     /**
@@ -86,7 +134,23 @@ class AssistantRuntimeManager(
             selection?.adapterSha256 == loadedAdapterSha256
 
         if (!matches) {
-            load(modelFile)
+            reloadInternal(modelFile, selection)
+        }
+    }
+
+    private suspend fun reloadInternal(modelFile: File, selection: ActiveSelection?) {
+        closeInternal()
+        val newEngine = engineFactory(modelFile)
+        try {
+            newEngine.initialize()
+            engine = newEngine
+            loadedModelFile = modelFile
+            loadedActiveVersionId = selection?.versionId
+            loadedAdapterFile = selection?.adapterFile
+            loadedAdapterSha256 = selection?.adapterSha256
+        } catch (error: Throwable) {
+            newEngine.close()
+            throw error
         }
     }
 
@@ -162,6 +226,16 @@ class AssistantRuntimeManager(
     }
 
     override fun close() {
+        synchronized(operationStateLock) {
+            if (activeOperations > 0) {
+                closeRequested = true
+                return
+            }
+            closeInternal()
+        }
+    }
+
+    private fun closeInternal() {
         engine?.close()
         engine = null
         loadedModelFile = null
