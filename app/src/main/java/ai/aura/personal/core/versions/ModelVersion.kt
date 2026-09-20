@@ -7,6 +7,7 @@ data class ModelVersion(
     val baseModelId: String,
     val adapterFile: File?,
     val state: State,
+    val baseModelSha256: String? = null,
     val evaluationReportId: String?,
     val createdAtEpochMs: Long
 ) {
@@ -16,6 +17,11 @@ data class ModelVersion(
         }
         require(baseModelId.isNotBlank()) { "Base model id must not be blank" }
         require(createdAtEpochMs >= 0L) { "Model version timestamp must not be negative" }
+        baseModelSha256?.let {
+            require(it.matches(SHA256_PATTERN)) {
+                "Base model SHA-256 must be 64 lowercase hexadecimal characters"
+            }
+        }
 
         if (state == State.CANDIDATE) {
             require(adapterFile != null) {
@@ -35,5 +41,6 @@ data class ModelVersion(
 
     companion object {
         private val ID_PATTERN = Regex("[A-Za-z0-9._-]{1,128}")
+        private val SHA256_PATTERN = Regex("[0-9a-f]{64}")
     }
 }
