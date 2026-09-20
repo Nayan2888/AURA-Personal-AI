@@ -70,11 +70,7 @@ import ai.aura.personal.core.experience.ExperienceStore
 import ai.aura.personal.core.experience.LearningConsentStore
 import ai.aura.personal.core.experience.LearningDatasetStore
 import ai.aura.personal.core.inference.LocalModelStore
-import ai.aura.personal.core.knowledge.LearnedKnowledgeStore
 import ai.aura.personal.core.navigation.AuraDestination
-import ai.aura.personal.core.research.AndroidResearchAccessController
-import ai.aura.personal.core.research.ResearchConsentStore
-import ai.aura.personal.core.research.WikimediaResearchProvider
 import ai.aura.personal.core.versions.ModelVersionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -112,25 +108,10 @@ private fun AuraRoot() {
     val experienceStore = remember { ExperienceStore(context) }
     val learningConsentStore = remember { LearningConsentStore(context) }
     val learningDatasetStore = remember { LearningDatasetStore(context) }
-    val learnedKnowledgeStore = remember { LearnedKnowledgeStore(context.filesDir) }
-    val researchConsentStore = remember { ResearchConsentStore(context) }
-    val researchAccessController = remember {
-        AndroidResearchAccessController(
-            context = context,
-            consentStore = researchConsentStore
-        )
-    }
-    val researchProvider = remember {
-        WikimediaResearchProvider(researchAccessController)
-    }
-    var researchEnabled by remember { mutableStateOf(researchConsentStore.isGranted()) }
     val runtime = remember {
         AssistantRuntimeManager(
             modelVersionStore = modelVersionStore,
-            evaluationReportStore = evaluationReportStore,
-            researchProvider = researchProvider,
-            learnedKnowledgeStore = learnedKnowledgeStore,
-            learningConsentStore = learningConsentStore
+            evaluationReportStore = evaluationReportStore
         )
     }
     val scope = rememberCoroutineScope()
@@ -153,17 +134,11 @@ private fun AuraRoot() {
     var showLearningConsent by remember { mutableStateOf(false) }
     var datasetEntryCount by remember { mutableStateOf(0) }
     var datasetStatus by remember { mutableStateOf<String?>(null) }
-    var learnedKnowledgeCount by remember { mutableStateOf(learnedKnowledgeStore.list().size) }
-    var showClearLearnedKnowledge by remember { mutableStateOf(false) }
     val feedbackStates = remember { mutableStateMapOf<String, ExperienceRecord.Outcome>() }
     val attachments = remember { mutableStateMapOf<String, SelectedAttachment>() }
 
     fun refreshHistory() {
         history = historyStore.list()
-    }
-
-    fun refreshLearnedKnowledge() {
-        learnedKnowledgeCount = learnedKnowledgeStore.list().size
     }
 
     fun buildLearningDataset() {
@@ -217,24 +192,13 @@ private fun AuraRoot() {
     LaunchedEffect(selectedModelPath, modelRevision) {
         modelLoading = selectedModelPath != null
         runtimeError = null
-        val requestedPath = selectedModelPath
-
-        if (requestedPath == null) {
+        if (selectedModelPath == null) {
             runtime.close()
         } else {
-            val requestedModel = File(requestedPath)
             runCatching {
-                runtime.load(requestedModel)
-            }.onSuccess {
-                modelStore.selectModel(requestedModel)
+                runtime.load(File(selectedModelPath!!))
             }.onFailure { error ->
                 runtimeError = error.message ?: "Local model initialization failed."
-
-                val persistedPath = modelStore.selectedModel()?.absolutePath
-                if (persistedPath != requestedPath) {
-                    selectedModelPath = persistedPath
-                    modelRevision += 1
-                }
             }
         }
         modelLoading = false
@@ -393,33 +357,6 @@ private fun AuraRoot() {
             )
         }
 
-        if (showClearLearnedKnowledge) {
-            AlertDialog(
-                onDismissRequest = { showClearLearnedKnowledge = false },
-                title = { Text("Clear learned research?") },
-                text = {
-                    Text(
-                        "This removes AURA's locally stored research knowledge. " +
-                            "It does not delete chat history or change the model."
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        learnedKnowledgeStore.deleteAll()
-                        learnedKnowledgeCount = 0
-                        showClearLearnedKnowledge = false
-                    }) {
-                        Text("Clear")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showClearLearnedKnowledge = false }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-
         if (showRename) {
             AlertDialog(
                 onDismissRequest = { showRename = false },
@@ -544,10 +481,7 @@ private fun AuraRoot() {
                                     selected = selectedDestination == destination,
                                     onClick = {
                                         selectedDestination = destination
-                                        if (destination == AuraDestination.MEMORY) {
-                                            refreshHistory()
-                                            refreshLearnedKnowledge()
-                                        }
+                                        if (destination == AuraDestination.MEMORY) refreshHistory()
                                     },
                                     icon = { Text(icons[index]) },
                                     label = { Text(destination.title) }
@@ -579,18 +513,9 @@ private fun AuraRoot() {
                         datasetExists = learningDatasetStore.datasetFile()?.exists() == true,
                         datasetEntryCount = datasetEntryCount,
                         datasetStatus = datasetStatus,
-                        onBuildDataset = ::buildLearningDataset,
-                        learnedKnowledgeCount = learnedKnowledgeCount,
-                        onClearLearnedKnowledge = { showClearLearnedKnowledge = true }
+                        onBuildDataset = ::buildLearningDataset
                     )
-                    AuraDestination.TOOLS -> ResearchScreen(
-                        enabled = researchEnabled,
-                        onEnabledChange = { enabled ->
-                            researchEnabled = enabled
-                            researchConsentStore.setGranted(enabled)
-                        },
-                        provider = researchProvider
-                    )
+                    AuraDestination.TOOLS,
                     AuraDestination.SKILLS,
                     AuraDestination.SETTINGS -> FeatureStatusScreen(selectedDestination)
                 }
@@ -769,43 +694,10 @@ private fun HistoryScreen(
     datasetExists: Boolean,
     datasetEntryCount: Int,
     datasetStatus: String?,
-    onBuildDataset: () -> Unit,
-    learnedKnowledgeCount: Int,
-    onClearLearnedKnowledge: () -> Unit
+    onBuildDataset: () -> Unit
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Chat History", style = MaterialTheme.typography.headlineSmall) }
-
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("Learned research", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        if (learnedKnowledgeCount == 0) {
-                            "No research knowledge is stored locally yet."
-                        } else {
-                            learnedKnowledgeCount.toString() +
-                                " research entries are available for offline reuse when Learning is ON."
-                        }
-                    )
-                    Text(
-                        "Stored research keeps source provenance. It is separate from model weights.",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    if (learnedKnowledgeCount > 0) {
-                        TextButton(onClick = onClearLearnedKnowledge) {
-                            Text("Clear learned research")
-                        }
-                    }
-                }
-            }
-        }
 
         item {
             Card(

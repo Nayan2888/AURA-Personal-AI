@@ -16,9 +16,6 @@ class ModelVersionStoreTest {
     @Test
     fun candidateCanBeRegisteredAndPersisted() {
         val root = temporaryFolder.newFolder("versions")
-        val baseModel = temporaryFolder.newFile("base-initial.litertlm").apply {
-            writeText("base")
-        }
         val adapter = TrainingArtifactStore(root).publish(
             temporaryFolder.newFile("candidate-source.adapter").apply {
                 writeText("adapter")
@@ -30,7 +27,6 @@ class ModelVersionStoreTest {
             baseModelId = "base-1",
             adapterFile = adapter,
             state = ModelVersion.State.CANDIDATE,
-            baseModelSha256 = ArtifactDigest.sha256(baseModel),
             evaluationReportId = "eval-1",
             createdAtEpochMs = 1L
         )
@@ -45,9 +41,6 @@ class ModelVersionStoreTest {
     @Test
     fun activationRequiresApprovalAndEvaluationChecks() {
         val root = temporaryFolder.newFolder("versions")
-        val baseModel = temporaryFolder.newFile("base-activation.litertlm").apply {
-            writeText("base")
-        }
         val adapter = TrainingArtifactStore(root).publish(
             temporaryFolder.newFile("candidate-source.adapter").apply {
                 writeText("adapter")
@@ -59,7 +52,6 @@ class ModelVersionStoreTest {
             baseModelId = "base-1",
             adapterFile = adapter,
             state = ModelVersion.State.CANDIDATE,
-            baseModelSha256 = ArtifactDigest.sha256(baseModel),
             evaluationReportId = "eval-1",
             createdAtEpochMs = 1L
         )
@@ -71,7 +63,6 @@ class ModelVersionStoreTest {
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
             candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
-            baseModelSha256 = ArtifactDigest.sha256(baseModel),
             evaluatedExampleCount = 5,
             baseMeanError = 0.5,
             candidateMeanError = 0.4,
@@ -108,12 +99,10 @@ class ModelVersionStoreTest {
     @Test
     fun approvalCannotPredateEvaluation() {
         val root = temporaryFolder.newFolder("approval-order")
-        val baseModel = temporaryFolder.newFile("base-approval-order.litertlm").apply {
-            writeText("base")
-        }
         val adapter = TrainingArtifactStore(root).publish(
-            temporaryFolder.newFile("candidate-source.adapter")
-                .apply { writeText("adapter") },
+            temporaryFolder.newFile("candidate-source.adapter").apply {
+                writeText("adapter")
+            },
             "candidate-1"
         )
         val store = ModelVersionStore(root)
@@ -123,7 +112,6 @@ class ModelVersionStoreTest {
                 baseModelId = "base-1",
                 adapterFile = adapter,
                 state = ModelVersion.State.CANDIDATE,
-                baseModelSha256 = ArtifactDigest.sha256(baseModel),
                 evaluationReportId = "eval-1",
                 createdAtEpochMs = 1L
             )
@@ -136,7 +124,6 @@ class ModelVersionStoreTest {
                 baseVersionId = "base-1",
                 candidateVersionId = "candidate-1",
                 candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
-                baseModelSha256 = ArtifactDigest.sha256(baseModel),
                 evaluatedExampleCount = 1,
                 baseMeanError = 0.5,
                 candidateMeanError = 0.4,
@@ -157,102 +144,14 @@ class ModelVersionStoreTest {
             (error as ModelVersionStore.ActivationResult.REJECTED).reason
         )
     }
- 
-    @Test
-    fun activationRejectsDifferentBaseModelFingerprintEvenWhenIdsMatch() {
-        val root = temporaryFolder.newFolder("fingerprint-mismatch")
-        val firstBase = temporaryFolder.newFile("first-base.litertlm").apply {
-            writeText("first-base")
-        }
-        val secondBase = temporaryFolder.newFile("second-base.litertlm").apply {
-            writeText("second-base")
-        }
-        val firstAdapter = TrainingArtifactStore(root).publish(
-            temporaryFolder.newFile("first.adapter").apply { writeText("first") },
-            "candidate-1"
-        )
-        val secondAdapter = TrainingArtifactStore(root).publish(
-            temporaryFolder.newFile("second.adapter").apply { writeText("second") },
-            "candidate-2"
-        )
-        val store = ModelVersionStore(root)
-
-        store.registerCandidate(
-            ModelVersion(
-                id = "candidate-1",
-                baseModelId = "base-1",
-                adapterFile = firstAdapter,
-                state = ModelVersion.State.CANDIDATE,
-                baseModelSha256 = ArtifactDigest.sha256(firstBase),
-                evaluationReportId = "eval-1",
-                createdAtEpochMs = 1L
-            )
-        )
-        val firstReport = EvaluationReport(
-            id = "eval-1",
-            baseVersionId = "base-1",
-            candidateVersionId = "candidate-1",
-            candidateAdapterSha256 = ArtifactDigest.sha256(firstAdapter),
-            baseModelSha256 = ArtifactDigest.sha256(firstBase),
-            evaluatedExampleCount = 1,
-            baseMeanError = 1.0,
-            candidateMeanError = 0.9,
-            safetyChecksPassed = true,
-            compatibilityChecksPassed = true,
-            completedAtEpochMs = 2L
-        )
-        assertTrue(
-            store.activateCandidate(
-                "candidate-1",
-                firstReport,
-                ActivationApproval("approval-1", "candidate-1", "eval-1", 3L)
-            ) is ModelVersionStore.ActivationResult.ACTIVATED
-        )
-
-        store.registerCandidate(
-            ModelVersion(
-                id = "candidate-2",
-                baseModelId = "base-1",
-                adapterFile = secondAdapter,
-                state = ModelVersion.State.CANDIDATE,
-                baseModelSha256 = ArtifactDigest.sha256(secondBase),
-                evaluationReportId = "eval-2",
-                createdAtEpochMs = 4L
-            )
-        )
-        val result = store.activateCandidate(
-            "candidate-2",
-            EvaluationReport(
-                id = "eval-2",
-                baseVersionId = "candidate-1",
-                candidateVersionId = "candidate-2",
-                candidateAdapterSha256 = ArtifactDigest.sha256(secondAdapter),
-                baseModelSha256 = ArtifactDigest.sha256(secondBase),
-                evaluatedExampleCount = 1,
-                baseMeanError = 1.0,
-                candidateMeanError = 0.9,
-                safetyChecksPassed = true,
-                compatibilityChecksPassed = true,
-                completedAtEpochMs = 5L
-            ),
-            ActivationApproval("approval-2", "candidate-2", "eval-2", 6L)
-        )
-
-        assertEquals(
-            "Candidate base model fingerprint does not match the current active model",
-            (result as ModelVersionStore.ActivationResult.REJECTED).reason
-        )
-    }
 
     @Test
     fun activationRejectsArtifactChangedAfterEvaluation() {
         val root = temporaryFolder.newFolder("versions-tampered")
-        val baseModel = temporaryFolder.newFile("base-tampered.litertlm").apply {
-            writeText("base")
-        }
         val adapter = TrainingArtifactStore(root).publish(
-            temporaryFolder.newFile("candidate-source.adapter")
-                .apply { writeText("adapter") },
+            temporaryFolder.newFile("candidate-source.adapter").apply {
+                writeText("adapter")
+            },
             "candidate-1"
         )
         val store = ModelVersionStore(root)
@@ -260,7 +159,6 @@ class ModelVersionStoreTest {
             ModelVersion(
                 id = "candidate-1",
                 baseModelId = "base-1",
-                baseModelSha256 = ArtifactDigest.sha256(baseModel),
                 adapterFile = adapter,
                 state = ModelVersion.State.CANDIDATE,
                 evaluationReportId = "eval-1",
@@ -273,7 +171,6 @@ class ModelVersionStoreTest {
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
             candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
-            baseModelSha256 = ArtifactDigest.sha256(baseModel),
             evaluatedExampleCount = 1,
             baseMeanError = 0.5,
             candidateMeanError = 0.4,

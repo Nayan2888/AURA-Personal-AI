@@ -5,7 +5,6 @@ data class EvaluationReport(
     val baseVersionId: String,
     val candidateVersionId: String,
     val candidateAdapterSha256: String,
-    val baseModelSha256: String? = null,
     val evaluatedExampleCount: Int,
     val baseMeanError: Double,
     val candidateMeanError: Double,
@@ -21,11 +20,6 @@ data class EvaluationReport(
         }
         require(candidateAdapterSha256.matches(SHA256_PATTERN)) {
             "Candidate adapter SHA-256 must be a lowercase 64-character hexadecimal digest"
-        }
-        baseModelSha256?.let {
-            require(it.matches(SHA256_PATTERN)) {
-                "Base model SHA-256 must be a lowercase 64-character hexadecimal digest"
-            }
         }
         require(evaluatedExampleCount > 0) {
             "Evaluation must contain at least one example"
