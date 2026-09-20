@@ -71,6 +71,9 @@ import ai.aura.personal.core.experience.LearningConsentStore
 import ai.aura.personal.core.experience.LearningDatasetStore
 import ai.aura.personal.core.inference.LocalModelStore
 import ai.aura.personal.core.navigation.AuraDestination
+import ai.aura.personal.core.research.AndroidResearchAccessController
+import ai.aura.personal.core.research.ResearchConsentStore
+import ai.aura.personal.core.research.WikimediaResearchProvider
 import ai.aura.personal.core.versions.ModelVersionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -108,6 +111,17 @@ private fun AuraRoot() {
     val experienceStore = remember { ExperienceStore(context) }
     val learningConsentStore = remember { LearningConsentStore(context) }
     val learningDatasetStore = remember { LearningDatasetStore(context) }
+    val researchConsentStore = remember { ResearchConsentStore(context) }
+    val researchAccessController = remember {
+        AndroidResearchAccessController(
+            context = context,
+            consentStore = researchConsentStore
+        )
+    }
+    val researchProvider = remember {
+        WikimediaResearchProvider(researchAccessController)
+    }
+    var researchEnabled by remember { mutableStateOf(researchConsentStore.isGranted()) }
     val runtime = remember {
         AssistantRuntimeManager(
             modelVersionStore = modelVersionStore,
@@ -526,7 +540,14 @@ private fun AuraRoot() {
                         datasetStatus = datasetStatus,
                         onBuildDataset = ::buildLearningDataset
                     )
-                    AuraDestination.TOOLS,
+                    AuraDestination.TOOLS -> ResearchScreen(
+                        enabled = researchEnabled,
+                        onEnabledChange = { enabled ->
+                            researchEnabled = enabled
+                            researchConsentStore.setGranted(enabled)
+                        },
+                        provider = researchProvider
+                    )
                     AuraDestination.SKILLS,
                     AuraDestination.SETTINGS -> FeatureStatusScreen(selectedDestination)
                 }
