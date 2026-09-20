@@ -5,6 +5,9 @@ import ai.aura.personal.core.experience.LearningConsentStore
 import ai.aura.personal.core.knowledge.LearnedKnowledgeStore
 import ai.aura.personal.core.research.ResearchContextFormatter
 import ai.aura.personal.core.research.ResearchProvider
+import ai.aura.personal.core.research.ResearchSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import ai.aura.personal.core.research.ResearchTrigger
 import java.io.File
 
@@ -29,7 +32,9 @@ class ConversationOrchestrator(
 
         val learningEnabled = learningConsentStore?.isGranted() ?: true
         val learnedSources = if (learningEnabled) {
-            learnedKnowledgeStore?.search(userMessage.content).orEmpty()
+            withContext(Dispatchers.IO) {
+                learnedKnowledgeStore?.search(userMessage.content).orEmpty()
+            }
         } else {
             emptyList()
         }
@@ -42,7 +47,7 @@ class ConversationOrchestrator(
                 role = ChatMessage.Role.SYSTEM,
                 content = ResearchContextFormatter.format(
                     learnedSources.map { entry ->
-                        ai.aura.personal.core.research.ResearchSource(
+                        ResearchSource(
                             title = entry.title,
                             url = entry.url,
                             excerpt = entry.excerpt,
@@ -89,13 +94,15 @@ class ConversationOrchestrator(
 
         val evidence = ResearchContextFormatter.format(research.sources)
         if (learningConsentStore?.isGranted() == true) {
-            runCatching {
-                learnedKnowledgeStore?.remember(
-                    query = userMessage.content,
-                    sources = research.sources,
-                    consentGranted = true,
-                    learnedAtEpochMs = System.currentTimeMillis()
-                )
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    learnedKnowledgeStore?.remember(
+                        query = userMessage.content,
+                        sources = research.sources,
+                        consentGranted = true,
+                        learnedAtEpochMs = System.currentTimeMillis()
+                    )
+                }
             }
         }
 
