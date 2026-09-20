@@ -13,86 +13,95 @@ import java.io.File
 class ConversationOrchestratorResearchTest {
 
     @Test
-    fun uncertainLocalAnswerIsRewrittenUsingResearchEvidence() = runBlocking {
-        val engine = FakeEngine()
-        val provider = object : ResearchProvider {
-            override suspend fun search(
-                query: String,
-                maxResults: Int
-            ): ResearchResponse = ResearchResponse(
-                query = query,
-                sources = listOf(
-                    ResearchSource(
-                        title = "Authoritative article",
-                        url = "https://example.org/article",
-                        excerpt = "Grounded factual evidence.",
-                        provider = "Test"
+    fun uncertainLocalAnswerIsRewrittenUsingResearchEvidence() {
+        runBlocking {
+            val engine = FakeEngine()
+            val provider = object : ResearchProvider {
+                override suspend fun search(
+                    query: String,
+                    maxResults: Int
+                ): ResearchResponse = ResearchResponse(
+                    query = query,
+                    sources = listOf(
+                        ResearchSource(
+                            title = "Authoritative article",
+                            url = "https://example.org/article",
+                            excerpt = "Grounded factual evidence.",
+                            provider = "Test"
+                        )
                     )
                 )
+            }
+
+            val result = ConversationOrchestrator(
+                engine = engine,
+                researchProvider = provider
+            ).respond(
+                history = emptyList(),
+                userMessage = ChatMessage(
+                    id = "user-1",
+                    role = ChatMessage.Role.USER,
+                    content = "Tell me about this unknown topic.",
+                    createdAtEpochMs = 1L
+                )
             )
+
+            assertEquals(
+                "researched answer",
+                result.content.substringBefore("\n\nSources:")
+            )
+            assertEquals(2, engine.callCount)
+            assertTrue(engine.secondHistory.any { it.role == ChatMessage.Role.SYSTEM })
+            assertTrue(
+                engine.secondHistory.any {
+                    it.content.contains("UNTRUSTED RESEARCH DATA")
+                }
+            )
+            assertTrue(result.content.contains("https://example.org/article"))
         }
-
-        val result = ConversationOrchestrator(
-            engine = engine,
-            researchProvider = provider
-        ).respond(
-            history = emptyList(),
-            userMessage = ChatMessage(
-                id = "user-1",
-                role = ChatMessage.Role.USER,
-                content = "Tell me about this unknown topic.",
-                createdAtEpochMs = 1L
-            )
-        )
-
-        assertEquals("researched answer", result.content.substringBefore("
-
-Sources:"))
-        assertEquals(2, engine.callCount)
-        assertTrue(engine.secondHistory.any { it.role == ChatMessage.Role.SYSTEM })
-        assertTrue(engine.secondHistory.any { it.content.contains("UNTRUSTED RESEARCH DATA") })
-        assertTrue(result.content.contains("https://example.org/article"))
     }
 
     @Test
-    fun researchFailureFallsBackToTheRealLocalAnswer() = runBlocking {
-        val engine = object : AssistantEngine {
-            override suspend fun initialize() = Unit
+    fun researchFailureFallsBackToTheRealLocalAnswer() {
+        runBlocking {
+            val engine = object : AssistantEngine {
+                override suspend fun initialize() = Unit
 
-            override suspend fun generate(
-                history: List<ChatMessage>,
-                userInput: String,
-                loraAdapterFile: File?
-            ): String = "I don't know."
+                override suspend fun generate(
+                    history: List<ChatMessage>,
+                    userInput: String,
+                    loraAdapterFile: File?
+                ): String = "I don't know."
 
-            override fun isInitialized(): Boolean = true
+                override fun isInitialized(): Boolean = true
 
-            override fun close() = Unit
-        }
-
-        val provider = object : ResearchProvider {
-            override suspend fun search(
-                query: String,
-                maxResults: Int
-            ): ResearchResponse {
-                throw IllegalStateException("research unavailable")
+                override fun close() = Unit
             }
-        }
 
-        val result = ConversationOrchestrator(
-            engine = engine,
-            researchProvider = provider
-        ).respond(
-            history = emptyList(),
-            userMessage = ChatMessage(
-                id = "user-2",
-                role = ChatMessage.Role.USER,
-                content = "Who is this?",
-                createdAtEpochMs = 1L
+            val provider = object : ResearchProvider {
+                override suspend fun search(
+                    query: String,
+                    maxResults: Int
+                ): ResearchResponse {
+                    throw IllegalStateException("research unavailable")
+                }
+            }
+
+            val result = ConversationOrchestrator(
+                engine = engine,
+                researchProvider = provider
+            ).respond(
+                history = emptyList(),
+                userMessage = ChatMessage(
+                    id = "user-2",
+                    role = ChatMessage.Role.USER,
+                    content = "Who is this?",
+                    createdAtEpochMs = 1L
+                )
             )
-        )
 
-        assertEquals("I don't know.", result.content)
+            assertEquals("I don't know.", result.content)
+        }
     }
 
     private class FakeEngine : AssistantEngine {
