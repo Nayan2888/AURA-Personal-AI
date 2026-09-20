@@ -27,9 +27,12 @@ class ConversationOrchestrator(
             "ConversationOrchestrator requires a USER message."
         }
 
-        val learnedSources = learnedKnowledgeStore
-            ?.search(userMessage.content)
-            .orEmpty()
+        val learningEnabled = learningConsentStore?.isGranted() ?: true
+        val learnedSources = if (learningEnabled) {
+            learnedKnowledgeStore?.search(userMessage.content).orEmpty()
+        } else {
+            emptyList()
+        }
 
         val localHistory = if (learnedSources.isEmpty()) {
             history
