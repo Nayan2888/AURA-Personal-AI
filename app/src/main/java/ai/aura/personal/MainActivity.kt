@@ -125,7 +125,8 @@ private fun AuraRoot() {
     val runtime = remember {
         AssistantRuntimeManager(
             modelVersionStore = modelVersionStore,
-            evaluationReportStore = evaluationReportStore
+            evaluationReportStore = evaluationReportStore,
+            researchProvider = researchProvider
         )
     }
     val scope = rememberCoroutineScope()
