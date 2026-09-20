@@ -57,6 +57,7 @@ class ModelActivationCoordinatorTest {
                 baseVersionId = "base-1",
                 candidateVersionId = "candidate-1",
                 candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
+                baseModelSha256 = ArtifactDigest.sha256(baseModel),
                 evaluatedExampleCount = 2,
                 baseMeanError = 1.0,
                 candidateMeanError = 0.9,
