@@ -1,6 +1,8 @@
 package ai.aura.personal.core.inference
 
 import ai.aura.personal.core.chat.ChatMessage
+import ai.aura.personal.core.experience.LearningConsentStore
+import ai.aura.personal.core.knowledge.LearnedKnowledgeStore
 import ai.aura.personal.core.research.ResearchContextFormatter
 import ai.aura.personal.core.research.ResearchProvider
 import ai.aura.personal.core.research.ResearchTrigger
@@ -12,7 +14,9 @@ import java.io.File
  */
 class ConversationOrchestrator(
     private val engine: AssistantEngine,
-    private val researchProvider: ResearchProvider? = null
+    private val researchProvider: ResearchProvider? = null,
+    private val learnedKnowledgeStore: LearnedKnowledgeStore? = null,
+    private val learningConsentStore: LearningConsentStore? = null
 ) {
     suspend fun respond(
         history: List<ChatMessage>,
@@ -23,8 +27,32 @@ class ConversationOrchestrator(
             "ConversationOrchestrator requires a USER message."
         }
 
+        val learnedSources = learnedKnowledgeStore
+            ?.search(userMessage.content)
+            .orEmpty()
+
+        val localHistory = if (learnedSources.isEmpty()) {
+            history
+        } else {
+            history + ChatMessage(
+                id = "learned-knowledge-" + userMessage.id,
+                role = ChatMessage.Role.SYSTEM,
+                content = ResearchContextFormatter.format(
+                    learnedSources.map { entry ->
+                        ai.aura.personal.core.research.ResearchSource(
+                            title = entry.title,
+                            url = entry.url,
+                            excerpt = entry.excerpt,
+                            provider = entry.provider
+                        )
+                    }
+                ),
+                createdAtEpochMs = System.currentTimeMillis()
+            )
+        }
+
         val output = engine.generate(
-            history = history,
+            history = localHistory,
             userInput = userMessage.content,
             loraAdapterFile = loraAdapterFile
         )
@@ -57,8 +85,17 @@ class ConversationOrchestrator(
         }
 
         val evidence = ResearchContextFormatter.format(research.sources)
+        learningConsentStore?.let { consentStore ->
+            learnedKnowledgeStore?.remember(
+                query = userMessage.content,
+                sources = research.sources,
+                consentGranted = consentStore.isGranted(),
+                learnedAtEpochMs = System.currentTimeMillis()
+            )
+        }
+
         val groundedOutput = engine.generate(
-            history = history + ChatMessage(
+            history = localHistory + ChatMessage(
                 id = "research-context-" + userMessage.id,
                 role = ChatMessage.Role.SYSTEM,
                 content = evidence,
