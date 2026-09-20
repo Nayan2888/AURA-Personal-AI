@@ -192,13 +192,24 @@ private fun AuraRoot() {
     LaunchedEffect(selectedModelPath, modelRevision) {
         modelLoading = selectedModelPath != null
         runtimeError = null
-        if (selectedModelPath == null) {
+        val requestedPath = selectedModelPath
+
+        if (requestedPath == null) {
             runtime.close()
         } else {
+            val requestedModel = File(requestedPath)
             runCatching {
-                runtime.load(File(selectedModelPath!!))
+                runtime.load(requestedModel)
+            }.onSuccess {
+                modelStore.selectModel(requestedModel)
             }.onFailure { error ->
                 runtimeError = error.message ?: "Local model initialization failed."
+
+                val persistedPath = modelStore.selectedModel()?.absolutePath
+                if (persistedPath != requestedPath) {
+                    selectedModelPath = persistedPath
+                    modelRevision += 1
+                }
             }
         }
         modelLoading = false
