@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -56,20 +57,26 @@ internal fun ResearchScreen(
         sources = emptyList()
 
         scope.launch {
-            runCatching {
-                provider.search(normalized, ResearchProvider.DEFAULT_MAX_RESULTS)
-            }.onSuccess { response ->
+            try {
+                val response = provider.search(
+                    normalized,
+                    ResearchProvider.DEFAULT_MAX_RESULTS
+                )
                 sources = response.sources
                 status = if (response.sources.isEmpty()) {
                     "No usable research sources were returned."
                 } else {
                     "Found " + response.sources.size + " source(s)."
                 }
-            }.onFailure { error ->
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
                 status = error.message ?: "Research request failed."
+            } finally {
+                searching = false
             }
-            searching = false
         }
+
     }
 
     LazyColumn(
