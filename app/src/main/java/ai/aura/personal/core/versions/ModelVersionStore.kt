@@ -225,6 +225,8 @@ class ModelVersionStore(
                     ?: throw IllegalStateException("Missing base model id for " + id),
                 adapterFile = adapterPath?.let(::File),
                 state = state,
+                baseModelSha256 = properties.getProperty(prefix + "baseModelSha256")
+                    ?.takeIf { it.isNotBlank() },
                 evaluationReportId = evaluationReportId,
                 createdAtEpochMs = createdAt
             )
@@ -280,6 +282,9 @@ class ModelVersionStore(
             val prefix = "version." + index + "."
             properties.setProperty(prefix + "id", version.id)
             properties.setProperty(prefix + "baseModelId", version.baseModelId)
+            version.baseModelSha256?.let {
+                properties.setProperty(prefix + "baseModelSha256", it)
+            }
             properties.setProperty(prefix + "state", version.state.name)
             properties.setProperty(prefix + "createdAt", version.createdAtEpochMs.toString())
             version.adapterFile?.let {
