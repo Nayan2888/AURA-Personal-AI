@@ -47,10 +47,14 @@ class ModelVersionStoreTest {
             },
             "candidate-1"
         )
+        val baseModel = temporaryFolder.newFile("base-model.litertlm").apply {
+            writeText("base-model")
+        }
         val candidate = ModelVersion(
             id = "candidate-1",
             baseModelId = "base-1",
             adapterFile = adapter,
+            baseModelSha256 = ArtifactDigest.sha256(baseModel),
             state = ModelVersion.State.CANDIDATE,
             evaluationReportId = "eval-1",
             createdAtEpochMs = 1L
@@ -155,11 +159,15 @@ class ModelVersionStoreTest {
             "candidate-1"
         )
         val store = ModelVersionStore(root)
+        val baseModel = temporaryFolder.newFile("base-model.litertlm").apply {
+            writeText("base-model")
+        }
         store.registerCandidate(
             ModelVersion(
                 id = "candidate-1",
                 baseModelId = "base-1",
                 adapterFile = adapter,
+                baseModelSha256 = ArtifactDigest.sha256(baseModel),
                 state = ModelVersion.State.CANDIDATE,
                 evaluationReportId = "eval-1",
                 createdAtEpochMs = 1L
