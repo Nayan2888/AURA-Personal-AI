@@ -65,20 +65,20 @@ class AssistantRuntimeManager(
         try {
             lifecycleMutex.withLock {
                 val selection = readActiveSelection(modelFile)
-
-                closeInternal()
                 val newEngine = engineFactory(modelFile)
+
                 try {
                     newEngine.initialize()
-                    engine = newEngine
-                    loadedModelFile = modelFile
-                    loadedActiveVersionId = selection?.versionId
-                    loadedAdapterFile = selection?.adapterFile
-                    loadedAdapterSha256 = selection?.adapterSha256
                 } catch (error: Throwable) {
-                    newEngine.close()
+                    runCatching { newEngine.close() }
                     throw error
                 }
+
+                installRuntime(
+                    newEngine = newEngine,
+                    modelFile = modelFile,
+                    selection = selection
+                )
             }
         } finally {
             endOperation()
@@ -139,19 +139,36 @@ class AssistantRuntimeManager(
     }
 
     private suspend fun reloadInternal(modelFile: File, selection: ActiveSelection?) {
-        closeInternal()
         val newEngine = engineFactory(modelFile)
+
         try {
             newEngine.initialize()
-            engine = newEngine
-            loadedModelFile = modelFile
-            loadedActiveVersionId = selection?.versionId
-            loadedAdapterFile = selection?.adapterFile
-            loadedAdapterSha256 = selection?.adapterSha256
         } catch (error: Throwable) {
-            newEngine.close()
+            runCatching { newEngine.close() }
             throw error
         }
+
+        installRuntime(
+            newEngine = newEngine,
+            modelFile = modelFile,
+            selection = selection
+        )
+    }
+
+    private fun installRuntime(
+        newEngine: AssistantEngine,
+        modelFile: File,
+        selection: ActiveSelection?
+    ) {
+        val previousEngine = engine
+
+        engine = newEngine
+        loadedModelFile = modelFile
+        loadedActiveVersionId = selection?.versionId
+        loadedAdapterFile = selection?.adapterFile
+        loadedAdapterSha256 = selection?.adapterSha256
+
+        runCatching { previousEngine?.close() }
     }
 
     private fun readActiveSelection(modelFile: File): ActiveSelection? {
@@ -236,12 +253,13 @@ class AssistantRuntimeManager(
     }
 
     private fun closeInternal() {
-        engine?.close()
+        val currentEngine = engine
         engine = null
         loadedModelFile = null
         loadedActiveVersionId = null
         loadedAdapterFile = null
         loadedAdapterSha256 = null
+        currentEngine?.close()
     }
 
     private data class ActiveSelection(
