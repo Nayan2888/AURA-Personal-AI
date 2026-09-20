@@ -95,7 +95,7 @@ class WikimediaResearchProvider(
             if (status !in 200..299) {
                 throw IllegalStateException("Research provider returned HTTP " + status)
             }
-            readBounded(connection.inputStream).toString(StandardCharsets.UTF_8.name())
+            String(readBounded(connection.inputStream), StandardCharsets.UTF_8)
         } finally {
             connection.disconnect()
         }
