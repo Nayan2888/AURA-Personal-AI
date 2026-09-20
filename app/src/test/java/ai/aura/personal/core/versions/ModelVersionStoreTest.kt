@@ -45,6 +45,9 @@ class ModelVersionStoreTest {
     @Test
     fun activationRequiresApprovalAndEvaluationChecks() {
         val root = temporaryFolder.newFolder("versions")
+        val baseModel = temporaryFolder.newFile("base-activation.litertlm").apply {
+            writeText("base")
+        }
         val adapter = TrainingArtifactStore(root).publish(
             temporaryFolder.newFile("candidate-source.adapter").apply {
                 writeText("adapter")
@@ -56,6 +59,7 @@ class ModelVersionStoreTest {
             baseModelId = "base-1",
             adapterFile = adapter,
             state = ModelVersion.State.CANDIDATE,
+            baseModelSha256 = ArtifactDigest.sha256(baseModel),
             evaluationReportId = "eval-1",
             createdAtEpochMs = 1L
         )
@@ -67,6 +71,7 @@ class ModelVersionStoreTest {
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
             candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
+            baseModelSha256 = ArtifactDigest.sha256(baseModel),
             evaluatedExampleCount = 5,
             baseMeanError = 0.5,
             candidateMeanError = 0.4,
@@ -131,6 +136,7 @@ class ModelVersionStoreTest {
                 baseVersionId = "base-1",
                 candidateVersionId = "candidate-1",
                 candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
+                baseModelSha256 = ArtifactDigest.sha256(baseModel),
                 evaluatedExampleCount = 1,
                 baseMeanError = 0.5,
                 candidateMeanError = 0.4,
@@ -187,6 +193,7 @@ class ModelVersionStoreTest {
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
             candidateAdapterSha256 = ArtifactDigest.sha256(firstAdapter),
+            baseModelSha256 = ArtifactDigest.sha256(firstBase),
             evaluatedExampleCount = 1,
             baseMeanError = 1.0,
             candidateMeanError = 0.9,
@@ -220,6 +227,7 @@ class ModelVersionStoreTest {
                 baseVersionId = "candidate-1",
                 candidateVersionId = "candidate-2",
                 candidateAdapterSha256 = ArtifactDigest.sha256(secondAdapter),
+                baseModelSha256 = ArtifactDigest.sha256(secondBase),
                 evaluatedExampleCount = 1,
                 baseMeanError = 1.0,
                 candidateMeanError = 0.9,
@@ -265,6 +273,7 @@ class ModelVersionStoreTest {
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
             candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
+            baseModelSha256 = ArtifactDigest.sha256(baseModel),
             evaluatedExampleCount = 1,
             baseMeanError = 0.5,
             candidateMeanError = 0.4,
