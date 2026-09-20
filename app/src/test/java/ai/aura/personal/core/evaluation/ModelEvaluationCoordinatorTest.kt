@@ -125,7 +125,6 @@ class ModelEvaluationCoordinatorTest {
                         )
                     ),
                     baseModelFile = baseModel,
-                    baseModelFile = baseModel,
                     candidateAdapterFile = adapter,
                     safetyChecksPassed = true,
                     compatibilityChecksPassed = true
@@ -185,6 +184,7 @@ class ModelEvaluationCoordinatorTest {
                             expectedOutput = "candidate answer"
                         )
                     ),
+                    baseModelFile = baseModel,
                     candidateAdapterFile = adapter,
                     safetyChecksPassed = true,
                     compatibilityChecksPassed = true
