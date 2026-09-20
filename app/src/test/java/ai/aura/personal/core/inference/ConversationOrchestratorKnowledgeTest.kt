@@ -26,7 +26,7 @@ class ConversationOrchestratorKnowledgeTest {
     @Test
     fun researchedEvidenceIsRetainedAndReusedOfflineWhenLearningIsEnabled() {
         runBlocking {
-            val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<Context>()
+            val context = org.robolectric.RuntimeEnvironment.getApplication()
             val consent = LearningConsentStore(context)
             consent.setGranted(true)
             val store = LearnedKnowledgeStore(temporaryFolder.root)
