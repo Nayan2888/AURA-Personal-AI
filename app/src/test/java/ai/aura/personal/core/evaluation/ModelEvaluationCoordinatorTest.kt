@@ -20,6 +20,9 @@ class ModelEvaluationCoordinatorTest {
     fun evaluatesAndPersistsImmutableEvidence() {
         runBlocking {
             val root = temporaryFolder.newFolder("evaluation-coordinator")
+            val baseModel = temporaryFolder.newFile("base.litertlm").apply {
+                writeText("base")
+            }
             val adapter = temporaryFolder.newFile("candidate.adapter").apply {
                 writeText("adapter")
             }
@@ -61,6 +64,7 @@ class ModelEvaluationCoordinatorTest {
                         expectedOutput = "candidate answer"
                     )
                 ),
+                baseModelFile = baseModel,
                 candidateAdapterFile = adapter,
                 safetyChecksPassed = true,
                 compatibilityChecksPassed = true
@@ -68,6 +72,7 @@ class ModelEvaluationCoordinatorTest {
 
             assertEquals("eval-1", report.id)
             assertEquals(ArtifactDigest.sha256(adapter), report.candidateAdapterSha256)
+            assertEquals(ArtifactDigest.sha256(baseModel), report.baseModelSha256)
             assertEquals(0.5, report.baseMeanError, 0.0)
             assertEquals(0.0, report.candidateMeanError, 0.0)
             assertEquals(1234L, report.completedAtEpochMs)
@@ -82,6 +87,9 @@ class ModelEvaluationCoordinatorTest {
     fun blankReportIdIsRejected() {
         runBlocking {
             val root = temporaryFolder.newFolder("evaluation-coordinator-invalid")
+            val baseModel = temporaryFolder.newFile("base.litertlm").apply {
+                writeText("base")
+            }
             val adapter = temporaryFolder.newFile("candidate.adapter").apply {
                 writeText("adapter")
             }
@@ -116,6 +124,7 @@ class ModelEvaluationCoordinatorTest {
                             expectedOutput = "answer"
                         )
                     ),
+                    baseModelFile = baseModel,
                     candidateAdapterFile = adapter,
                     safetyChecksPassed = true,
                     compatibilityChecksPassed = true
@@ -132,6 +141,9 @@ class ModelEvaluationCoordinatorTest {
     fun adapterMutationDuringEvaluationIsRejected() {
         runBlocking {
             val root = temporaryFolder.newFolder("evaluation-coordinator-mutating")
+            val baseModel = temporaryFolder.newFile("base.litertlm").apply {
+                writeText("base")
+            }
             val adapter = temporaryFolder.newFile("candidate.adapter").apply {
                 writeText("adapter")
             }
@@ -172,6 +184,7 @@ class ModelEvaluationCoordinatorTest {
                             expectedOutput = "candidate answer"
                         )
                     ),
+                    baseModelFile = baseModel,
                     candidateAdapterFile = adapter,
                     safetyChecksPassed = true,
                     compatibilityChecksPassed = true

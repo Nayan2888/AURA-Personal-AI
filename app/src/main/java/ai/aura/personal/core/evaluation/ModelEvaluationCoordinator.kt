@@ -19,6 +19,7 @@ class ModelEvaluationCoordinator(
         baseVersionId: String,
         candidateVersionId: String,
         examples: List<EvaluationExample>,
+        baseModelFile: File,
         candidateAdapterFile: File,
         safetyChecksPassed: Boolean,
         compatibilityChecksPassed: Boolean
@@ -32,12 +33,20 @@ class ModelEvaluationCoordinator(
         require(candidateVersionId.isNotBlank()) {
             "Candidate version id must not be blank"
         }
+        require(baseModelFile.isFile && baseModelFile.length() > 0L) {
+            "Base model file must be a non-empty file"
+        }
 
+        val baseModelSha256Before = ArtifactDigest.sha256(baseModelFile)
         val adapterSha256Before = ArtifactDigest.sha256(candidateAdapterFile)
         val evaluation = evaluationEngine.evaluate(
             examples = examples,
             candidateAdapterFile = candidateAdapterFile
         )
+        val baseModelSha256After = ArtifactDigest.sha256(baseModelFile)
+        check(baseModelSha256Before == baseModelSha256After) {
+            "Base model changed during evaluation"
+        }
         val adapterSha256After = ArtifactDigest.sha256(candidateAdapterFile)
         check(adapterSha256Before == adapterSha256After) {
             "Candidate adapter changed during evaluation"
@@ -48,6 +57,7 @@ class ModelEvaluationCoordinator(
             baseVersionId = baseVersionId,
             candidateVersionId = candidateVersionId,
             candidateAdapterSha256 = adapterSha256After,
+            baseModelSha256 = baseModelSha256After,
             evaluatedExampleCount = evaluation.evaluatedExampleCount,
             baseMeanError = evaluation.baseMeanError,
             candidateMeanError = evaluation.candidateMeanError,

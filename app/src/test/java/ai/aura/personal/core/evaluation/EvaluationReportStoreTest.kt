@@ -18,6 +18,7 @@ class EvaluationReportStoreTest {
             baseVersionId = "base-1",
             candidateVersionId = "candidate-1",
             candidateAdapterSha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            baseModelSha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             evaluatedExampleCount = 5,
             baseMeanError = 1.0,
             candidateMeanError = 0.8,
