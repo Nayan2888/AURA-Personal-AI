@@ -35,6 +35,9 @@ class WikimediaResearchProvider(
     ): ResearchResponse = withContext(Dispatchers.IO) {
         val normalizedQuery = query.trim()
         require(normalizedQuery.isNotEmpty()) { "Research query must not be blank" }
+        require(normalizedQuery.length <= MAX_QUERY_CHARS) {
+            "Research query exceeds the maximum allowed length"
+        }
         require(maxResults in 1..ResearchProvider.MAX_RESULTS) {
             "Research result count must be between 1 and " + ResearchProvider.MAX_RESULTS
         }
@@ -139,10 +142,8 @@ class WikimediaResearchProvider(
         title: String
     ): String {
         check(host in ALLOWED_WIKI_HOSTS) { "Unsupported Wikimedia host" }
-        val encodedPath = title.trim()
-            .split("/")
-            .joinToString("/") { encode(it).replace("+", "%20") }
-        return "https://" + host + "/api/rest_v1/page/summary/" + encodedPath
+        val encodedTitle = encode(title).replace("+", "%20")
+        return "https://" + host + "/api/rest_v1/page/summary/" + encodedTitle
     }
 
     private fun parseSearchResults(json: String): List<SearchItem> {
@@ -202,6 +203,7 @@ class WikimediaResearchProvider(
         const val CONNECT_TIMEOUT_MS = 8_000
         const val READ_TIMEOUT_MS = 12_000
         const val MAX_RESPONSE_BYTES = 1_000_000
+        const val MAX_QUERY_CHARS = 500
         const val BUFFER_SIZE = 16 * 1024
         const val USER_AGENT = "AURA-Personal-AI/0.1"
         val ALLOWED_WIKI_HOSTS = setOf("en.wikipedia.org", "hi.wikipedia.org")
