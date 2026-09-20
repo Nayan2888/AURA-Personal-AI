@@ -2,6 +2,7 @@ package ai.aura.personal.core.inference
 
 import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.evaluation.EvaluationReportStore
+import ai.aura.personal.core.research.ResearchProvider
 import ai.aura.personal.core.security.ArtifactDigest
 import ai.aura.personal.core.versions.ModelVersionStore
 import java.io.File
@@ -19,7 +20,8 @@ import kotlinx.coroutines.sync.withLock
 class AssistantRuntimeManager(
     private val modelVersionStore: ModelVersionStore? = null,
     private val evaluationReportStore: EvaluationReportStore? = null,
-    private val engineFactory: (File) -> AssistantEngine = { LiteRtLmAssistantEngine(it) }
+    private val engineFactory: (File) -> AssistantEngine = { LiteRtLmAssistantEngine(it) },
+    private val researchProvider: ResearchProvider? = null
 ) : AutoCloseable {
 
     private var engine: AssistantEngine? = null
@@ -108,7 +110,10 @@ class AssistantRuntimeManager(
                     )
                 }
 
-                ConversationOrchestrator(activeEngine).respond(
+                ConversationOrchestrator(
+                    engine = activeEngine,
+                    researchProvider = researchProvider
+                ).respond(
                     history = history,
                     userMessage = userMessage,
                     loraAdapterFile = pinnedAdapter
