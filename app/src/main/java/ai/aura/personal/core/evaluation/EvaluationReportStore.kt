@@ -68,6 +68,9 @@ class EvaluationReportStore(
                     ?: throw IllegalStateException(
                         "Missing candidate adapter SHA-256 for " + id
                     )
+            val baseModelSha256 =
+                properties.getProperty(prefix + "baseModelSha256")
+                    ?.takeIf { it.isNotBlank() }
             val evaluatedExampleCount =
                 properties.getProperty(prefix + "evaluatedExampleCount")?.toIntOrNull()
                     ?: throw IllegalStateException(
@@ -99,6 +102,7 @@ class EvaluationReportStore(
                 baseVersionId = baseVersionId,
                 candidateVersionId = candidateVersionId,
                 candidateAdapterSha256 = candidateAdapterSha256,
+                baseModelSha256 = baseModelSha256,
                 evaluatedExampleCount = evaluatedExampleCount,
                 baseMeanError = baseMeanError,
                 candidateMeanError = candidateMeanError,
@@ -124,6 +128,9 @@ class EvaluationReportStore(
                 prefix + "candidateAdapterSha256",
                 report.candidateAdapterSha256
             )
+            report.baseModelSha256?.let {
+                properties.setProperty(prefix + "baseModelSha256", it)
+            }
             properties.setProperty(
                 prefix + "evaluatedExampleCount",
                 report.evaluatedExampleCount.toString()
