@@ -47,11 +47,32 @@ class LocalModelStore(context: Context) {
             "Imported model is empty or could not be stored."
         }
 
-        preferences.edit()
-            .putString(KEY_SELECTED_MODEL_PATH, destination.absolutePath)
-            .apply()
-
         return destination
+    }
+
+    /**
+     * Commits an imported model as the selected model only after runtime
+     * initialization has succeeded.
+     */
+    fun selectModel(modelFile: File) {
+        val modelRoot = runCatching { modelDirectory.canonicalFile }
+            .getOrElse { throw IllegalStateException("Model directory is unavailable", it) }
+        val candidate = runCatching { modelFile.canonicalFile }
+            .getOrElse { throw IllegalArgumentException("Model file is unavailable", it) }
+
+        require(candidate.isFile && candidate.length() > 0L) {
+            "Selected model must be a non-empty file."
+        }
+        require(candidate.startsWith(modelRoot)) {
+            "Selected model must be inside AURA's private model directory."
+        }
+        require(candidate.extension.equals("litertlm", ignoreCase = true)) {
+            "AURA currently accepts .litertlm model files."
+        }
+
+        preferences.edit()
+            .putString(KEY_SELECTED_MODEL_PATH, candidate.absolutePath)
+            .apply()
     }
 
     fun clearSelection() {
