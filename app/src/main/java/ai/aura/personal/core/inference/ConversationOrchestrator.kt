@@ -39,9 +39,13 @@ class ConversationOrchestrator(
             )
         }
 
-        val research = runCatching {
+        val research = try {
             provider.search(userMessage.content, ResearchProvider.DEFAULT_MAX_RESULTS)
-        }.getOrNull()
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
 
         if (research == null || research.sources.isEmpty()) {
             return ChatMessage(
