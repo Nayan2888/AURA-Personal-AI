@@ -131,6 +131,84 @@ class AssistantRuntimeManagerTest {
     }
 
     @Test
+    fun activeVersionRejectsDifferentBaseModel() {
+        runBlocking {
+            val root = temporaryFolder.newFolder("base-mismatch")
+            val reports = EvaluationReportStore(root)
+            val versions = ModelVersionStore(root)
+            val baseModel = temporaryFolder.newFile("expected-base.litertlm").apply {
+                writeText("expected-base")
+            }
+            val adapterSource = temporaryFolder.newFile("candidate.source.adapter").apply {
+                writeText("adapter")
+            }
+            val adapter = TrainingArtifactStore(root).publish(adapterSource, "candidate-1")
+
+            versions.registerCandidate(
+                ModelVersion(
+                    id = "candidate-1",
+                    baseModelId = "base-1",
+                    adapterFile = adapter,
+                    state = ModelVersion.State.CANDIDATE,
+                    baseModelSha256 = ArtifactDigest.sha256(baseModel),
+                    evaluationReportId = "report-candidate-1",
+                    createdAtEpochMs = 1L
+                )
+            )
+            reports.save(
+                EvaluationReport(
+                    id = "report-candidate-1",
+                    baseVersionId = "base-1",
+                    candidateVersionId = "candidate-1",
+                    candidateAdapterSha256 = ArtifactDigest.sha256(adapter),
+                    evaluatedExampleCount = 1,
+                    baseMeanError = 1.0,
+                    candidateMeanError = 0.9,
+                    safetyChecksPassed = true,
+                    compatibilityChecksPassed = true,
+                    completedAtEpochMs = 2L
+                )
+            )
+            val approvalStore = ActivationApprovalStore(root)
+            approvalStore.save(
+                ActivationApproval(
+                    id = "approval-candidate-1",
+                    candidateVersionId = "candidate-1",
+                    evaluationReportId = "report-candidate-1",
+                    grantedAtEpochMs = 3L
+                )
+            )
+            val activation = ModelActivationCoordinator(
+                versions,
+                reports,
+                approvalStore
+            ).activate(
+                candidateVersionId = "candidate-1",
+                evaluationReportId = "report-candidate-1",
+                approvalId = "approval-candidate-1"
+            )
+            assertTrue(activation is ModelVersionStore.ActivationResult.ACTIVATED)
+
+            val wrongBase = temporaryFolder.newFile("wrong-base.litertlm").apply {
+                writeText("wrong-base")
+            }
+            val runtime = AssistantRuntimeManager(versions, reports) {
+                RecordingEngine(it)
+            }
+
+            val error = assertThrows(IllegalStateException::class.java) {
+                runBlocking {
+                    runtime.load(wrongBase)
+                }
+            }
+            assertEquals(
+                "Loaded base model hash does not match active model version.",
+                error.message
+            )
+        }
+    }
+
+    @Test
     fun tamperedActiveAdapterIsRejectedBeforeInference() {
         runBlocking {
         val root = temporaryFolder.newFolder("tamper")
@@ -169,6 +247,9 @@ class AssistantRuntimeManagerTest {
         createdAt: Long,
         reportBaseVersionId: String = baseVersionId
     ): File {
+        val baseModel = temporaryFolder.newFile(versionId + ".base.litertlm").apply {
+            writeText("base")
+        }
         val source = temporaryFolder.newFile(versionId + ".source.adapter").apply {
             writeText("adapter-" + versionId)
         }
@@ -179,6 +260,7 @@ class AssistantRuntimeManagerTest {
                 baseModelId = "base-1",
                 adapterFile = adapter,
                 state = ModelVersion.State.CANDIDATE,
+                baseModelSha256 = ArtifactDigest.sha256(baseModel),
                 evaluationReportId = "report-" + versionId,
                 createdAtEpochMs = createdAt
             )
