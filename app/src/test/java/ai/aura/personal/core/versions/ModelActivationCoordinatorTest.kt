@@ -16,6 +16,9 @@ class ModelActivationCoordinatorTest {
     @Test
     fun activationRequiresPersistedReportAndApproval() {
         val root = temporaryFolder.newFolder("activation")
+        val baseModel = temporaryFolder.newFile("base.litertlm").apply {
+            writeText("base")
+        }
         val adapter = TrainingArtifactStore(root).publish(
             temporaryFolder.newFile("candidate-source.adapter").apply {
                 writeText("adapter")
@@ -27,6 +30,7 @@ class ModelActivationCoordinatorTest {
             baseModelId = "base-1",
             adapterFile = adapter,
             state = ModelVersion.State.CANDIDATE,
+            baseModelSha256 = ArtifactDigest.sha256(baseModel),
             evaluationReportId = "eval-1",
             createdAtEpochMs = 1L
         )
@@ -86,6 +90,9 @@ class ModelActivationCoordinatorTest {
     @Test
     fun approvalMustMatchCandidateAndReport() {
         val root = temporaryFolder.newFolder("activation-mismatch")
+        val baseModel = temporaryFolder.newFile("base.litertlm").apply {
+            writeText("base")
+        }
         val adapter = TrainingArtifactStore(root).publish(
             temporaryFolder.newFile("candidate-source.adapter").apply {
                 writeText("adapter")
@@ -99,6 +106,7 @@ class ModelActivationCoordinatorTest {
                 baseModelId = "base-1",
                 adapterFile = adapter,
                 state = ModelVersion.State.CANDIDATE,
+                baseModelSha256 = ArtifactDigest.sha256(baseModel),
                 evaluationReportId = "eval-1",
                 createdAtEpochMs = 1L
             )
