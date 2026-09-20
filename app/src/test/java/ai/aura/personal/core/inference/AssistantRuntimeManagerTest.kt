@@ -11,6 +11,8 @@ import ai.aura.personal.core.versions.ModelActivationCoordinator
 import ai.aura.personal.core.versions.ModelVersion
 import ai.aura.personal.core.versions.ModelVersionStore
 import java.io.File
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -127,6 +129,141 @@ class AssistantRuntimeManagerTest {
         assertSame(engines[1], engines.last())
         assertEquals(secondAdapter, engines.last().lastAdapter)
         assertTrue(firstAdapter.exists())
+        }
+    }
+
+    @Test
+    fun closeIsDeferredUntilInFlightGenerationFinishes() {
+        runBlocking {
+            val root = temporaryFolder.newFolder("close-race")
+            val model = temporaryFolder.newFile("base.litertlm").apply {
+                writeText("base")
+            }
+            val blockingEngine = BlockingEngine(model)
+            val runtime = AssistantRuntimeManager(
+                modelVersionStore = ModelVersionStore(root),
+                evaluationReportStore = EvaluationReportStore(root)
+            ) {
+                blockingEngine
+            }
+
+            runtime.load(model)
+            val responseJob = launch {
+                runtime.respond(
+                    history = emptyList(),
+                    userMessage = userMessage("hello")
+                )
+            }
+
+            blockingEngine.generationStarted.await()
+            runtime.close()
+
+            assertTrue(!blockingEngine.closed)
+
+            blockingEngine.releaseGeneration.complete(Unit)
+            responseJob.join()
+
+            assertTrue(blockingEngine.closed)
+        }
+    }
+
+    @Test
+    fun loadWaitsForInFlightGenerationBeforeReplacingEngine() {
+        runBlocking {
+            val root = temporaryFolder.newFolder("reload-race")
+            val firstModel = temporaryFolder.newFile("first.litertlm").apply {
+                writeText("first")
+            }
+            val secondModel = temporaryFolder.newFile("second.litertlm").apply {
+                writeText("second")
+            }
+            val firstEngine = BlockingEngine(firstModel)
+            val secondEngine = RecordingEngine(secondModel)
+            var createdEngines = 0
+
+            val runtime = AssistantRuntimeManager(
+                modelVersionStore = ModelVersionStore(root),
+                evaluationReportStore = EvaluationReportStore(root)
+            ) { file ->
+                createdEngines += 1
+                if (createdEngines == 1) firstEngine else secondEngine
+            }
+
+            runtime.load(firstModel)
+            val responseJob = launch {
+                runtime.respond(
+                    history = emptyList(),
+                    userMessage = userMessage("hello")
+                )
+            }
+            firstEngine.generationStarted.await()
+
+            val loadJob = launch {
+                runtime.load(secondModel)
+            }
+
+            kotlinx.coroutines.yield()
+            assertTrue(!loadJob.isCompleted)
+            assertTrue(!firstEngine.closed)
+
+            firstEngine.releaseGeneration.complete(Unit)
+            responseJob.join()
+            loadJob.join()
+
+            assertTrue(firstEngine.closed)
+            assertTrue(secondEngine.initialized)
+            assertTrue(runtime.isReady())
+        }
+    }
+
+    @Test
+    fun failedRuntimeInitializationKeepsPreviousEngineActive() {
+        runBlocking {
+            val root = temporaryFolder.newFolder("reload-failure")
+            val workingModel = temporaryFolder.newFile("working.litertlm").apply {
+                writeText("working")
+            }
+            val failingModel = temporaryFolder.newFile("failing.litertlm").apply {
+                writeText("failing")
+            }
+            val workingEngine = RecordingEngine(workingModel)
+            var callCount = 0
+
+            val runtime = AssistantRuntimeManager(
+                modelVersionStore = ModelVersionStore(root),
+                evaluationReportStore = EvaluationReportStore(root)
+            ) {
+                callCount += 1
+                if (callCount == 1) {
+                    workingEngine
+                } else {
+                    object : AssistantEngine {
+                        override suspend fun initialize() {
+                            throw IllegalStateException("initialization failed")
+                        }
+
+                        override suspend fun generate(
+                            history: List<ChatMessage>,
+                            userInput: String,
+                            loraAdapterFile: File?
+                        ): String = error("unreachable")
+
+                        override fun isInitialized(): Boolean = false
+
+                        override fun close() = Unit
+                    }
+                }
+            }
+
+            runtime.load(workingModel)
+
+            val error = assertThrows(IllegalStateException::class.java) {
+                runBlocking {
+                    runtime.load(failingModel)
+                }
+            }
+            assertEquals("initialization failed", error.message)
+            assertTrue(runtime.isReady())
         }
     }
 
@@ -309,6 +446,39 @@ class AssistantRuntimeManagerTest {
         content = content,
         createdAtEpochMs = 1L
     )
+
+    private class BlockingEngine(
+        private val modelFile: File
+    ) : AssistantEngine {
+        val generationStarted = CompletableDeferred<Unit>()
+        val releaseGeneration = CompletableDeferred<Unit>()
+        var initialized = false
+        var closed = false
+
+        override suspend fun initialize() {
+            check(modelFile.isFile)
+            initialized = true
+            closed = false
+        }
+
+        override suspend fun generate(
+            history: List<ChatMessage>,
+            userInput: String,
+            loraAdapterFile: File?
+        ): String {
+            check(initialized)
+            generationStarted.complete(Unit)
+            releaseGeneration.await()
+            return "blocking-response"
+        }
+
+        override fun isInitialized(): Boolean = initialized
+
+        override fun close() {
+            initialized = false
+            closed = true
+        }
+    }
 
     private class RecordingEngine(
         private val modelFile: File
