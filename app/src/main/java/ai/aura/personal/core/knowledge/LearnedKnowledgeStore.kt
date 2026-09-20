@@ -157,7 +157,7 @@ class LearnedKnowledgeStore(
             source.url + "\u0000" + excerpt
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(payload.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
+        return digest.joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
     }
 
     private fun tokens(value: String): Set<String> {
