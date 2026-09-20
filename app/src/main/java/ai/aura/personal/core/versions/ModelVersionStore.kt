@@ -111,6 +111,15 @@ class ModelVersionStore(
             ?: return ActivationResult.REJECTED(
                 "Candidate base model fingerprint is missing"
             )
+        val evaluationBaseModelSha256 = evaluationReport.baseModelSha256
+            ?: return ActivationResult.REJECTED(
+                "Evaluation base model fingerprint is missing"
+            )
+        if (evaluationBaseModelSha256 != candidateBaseModelSha256) {
+            return ActivationResult.REJECTED(
+                "Evaluation base model fingerprint does not match candidate"
+            )
+        }
 
         requireCandidateAdapter(candidate.adapterFile)
         val candidateAdapterSha256 = ArtifactDigest.sha256(requireNotNull(candidate.adapterFile))
@@ -144,6 +153,11 @@ class ModelVersionStore(
             if (candidateBaseModelSha256 != currentActiveBaseModelSha256) {
                 return ActivationResult.REJECTED(
                     "Candidate base model fingerprint does not match the current active model"
+                )
+            }
+            if (evaluationBaseModelSha256 != currentActiveBaseModelSha256) {
+                return ActivationResult.REJECTED(
+                    "Evaluation base model fingerprint does not match the current active model"
                 )
             }
         } else if (evaluationReport.baseVersionId != candidate.baseModelId) {
