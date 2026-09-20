@@ -27,7 +27,7 @@ class AssistantRuntimeManager(
     private var loadedAdapterSha256: String? = null
 
     suspend fun load(modelFile: File) {
-        val selection = readActiveSelection()
+        val selection = readActiveSelection(modelFile)
 
         close()
         val newEngine = engineFactory(modelFile)
@@ -79,7 +79,7 @@ class AssistantRuntimeManager(
 
     private suspend fun ensureRuntimeMatchesActiveVersion() {
         val modelFile = loadedModelFile ?: return
-        val selection = readActiveSelection()
+        val selection = readActiveSelection(modelFile)
 
         val matches = selection?.versionId == loadedActiveVersionId &&
             sameFile(selection?.adapterFile, loadedAdapterFile) &&
@@ -90,9 +90,25 @@ class AssistantRuntimeManager(
         }
     }
 
-    private fun readActiveSelection(): ActiveSelection? {
+    private fun readActiveSelection(modelFile: File): ActiveSelection? {
         val store = modelVersionStore ?: return null
         val active = store.active() ?: return null
+
+        check(modelFile.isFile && modelFile.length() > 0L) {
+            "Local base model file is missing or empty."
+        }
+
+        val expectedBaseModelSha256 = active.baseModelSha256
+            ?: throw IllegalStateException(
+                "Active model version " + active.id +
+                    " has no base model fingerprint."
+            )
+        val actualBaseModelSha256 = ArtifactDigest.sha256(modelFile)
+        if (actualBaseModelSha256 != expectedBaseModelSha256) {
+            throw IllegalStateException(
+                "Loaded base model hash does not match active model version."
+            )
+        }
 
         val adapter = active.adapterFile
             ?: throw IllegalStateException(
