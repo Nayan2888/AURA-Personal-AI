@@ -1,0 +1,12 @@
+test_original_io_roundtrip_and_unicode (test_host_runtime.FileOperationsTests.test_original_io_roundtrip_and_unicode) ... ok
+test_path_traversal_and_existing_symlink_are_refused (test_host_runtime.FileOperationsTests.test_path_traversal_and_existing_symlink_are_refused) ... ok
+test_cancel_kills_process_group_including_descendant (test_host_runtime.NativeProcessTests.test_cancel_kills_process_group_including_descendant) ... ok
+test_spawn_failure_is_nonzero (test_host_runtime.NativeProcessTests.test_spawn_failure_is_nonzero) ... ok
+test_stdout_stderr_and_nonzero_exit (test_host_runtime.NativeProcessTests.test_stdout_stderr_and_nonzero_exit) ... ok
+test_bootstrap_keeps_current_interpreter_and_blocks_mutation (test_host_runtime.PackagedBootstrapTests.test_bootstrap_keeps_current_interpreter_and_blocks_mutation) ... ok
+test_real_worker_stdout_stderr_file_and_exit_status (test_host_runtime.PythonWorkerTests.test_real_worker_stdout_stderr_file_and_exit_status) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.304s
+
+OK

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(hermes_process C)
+add_library(hermes_process SHARED process.c jni.c)
+target_compile_options(hermes_process PRIVATE -Wall -Wextra -Werror)
+target_link_options(hermes_process PRIVATE "-Wl,-z,max-page-size=16384")

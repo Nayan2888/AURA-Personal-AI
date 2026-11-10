@@ -1,0 +1,21 @@
+{
+  "upstream_commit": "fc86fb39a1ffb2071e0bcda4e7f837e7d79e05b8",
+  "packaged_files": 8689,
+  "patched": [
+    {
+      "path": "hermes_bootstrap.py",
+      "original_sha256": "909862a202ee78d61c1d533f5f849a8b6c0f72a68c6eaf90eaa88d029a5d6b8c",
+      "packaged_sha256": "745f38d8baef7e26193e41426b55100656836b9198816c15a5f74af2dc670c08"
+    },
+    {
+      "path": "run_agent.py",
+      "original_sha256": "633c968343fe4c54f8f81a07a67bbc753deb0e3cc64ef87c1aa49d053a76ebc9",
+      "packaged_sha256": "27d0b58b271ab8558e709cfb9065b1773ca01d94b6a571cf41cfaecd35dbf3a7"
+    },
+    {
+      "path": "pm/client.py",
+      "original_sha256": "8dcca7cd9ecce89f43122c89aa273dfdf6c8e6775e4a36c0ae5f3e5f815d46f1",
+      "packaged_sha256": "eea92bdb3db9b400b0e17e504ba0924b3566ae4d5c181b358bac41c8a2c5b258"
+    }
+  ]
+}

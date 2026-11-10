@@ -1,22 +1,10 @@
-# IDE
-.idea/
-*.iml
-.externalNativeBuild/
-.cxx/
-
-# Build outputs
-build/
-**/build/
 .gradle/
+**/build/
 local.properties
-
-# Secrets and local configuration
-.env
-.env.*
-!.env.example
-*.keystore
+__pycache__/
+*.pyc
+.venv/
+wheelhouse/
+evidence/local/
 *.jks
-
-# OS files
-.DS_Store
-Thumbs.db
+*.keystore
