@@ -8,6 +8,7 @@ plugins {
 android {
     namespace = "dev.nayan.hermes"
     compileSdk = 36
+    buildToolsVersion = "36.0.0"
     ndkVersion = "28.2.13676358"
     defaultConfig {
         applicationId = "dev.nayan.hermes.port"
