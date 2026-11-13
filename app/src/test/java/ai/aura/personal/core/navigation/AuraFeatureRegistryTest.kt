@@ -22,8 +22,9 @@ class AuraFeatureRegistryTest {
         assertTrue(
             AuraFeatureRegistry.contractFor(AuraDestination.SKILLS).status != AuraFeatureStatus.IMPLEMENTED
         )
-        assertTrue(
-            AuraFeatureRegistry.contractFor(AuraDestination.SETTINGS).status != AuraFeatureStatus.IMPLEMENTED
+        assertEquals(
+            AuraFeatureStatus.IMPLEMENTED,
+            AuraFeatureRegistry.contractFor(AuraDestination.SETTINGS).status
         )
     }
 }

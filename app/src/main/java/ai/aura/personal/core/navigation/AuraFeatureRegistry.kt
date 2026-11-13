@@ -21,9 +21,10 @@ object AuraFeatureRegistry {
     val contracts: List<AuraFeatureContract> = listOf(
         AuraFeatureContract(AuraDestination.CHAT, AuraFeatureStatus.IMPLEMENTED, "Conversation workspace"),
         AuraFeatureContract(AuraDestination.MEMORY, AuraFeatureStatus.IMPLEMENTED, "Saved conversation history"),
+        AuraFeatureContract(AuraDestination.WORK, AuraFeatureStatus.IMPLEMENTED, "Model-assisted task briefs"),
         AuraFeatureContract(AuraDestination.TOOLS, AuraFeatureStatus.FOUNDATION_ONLY, "Tool catalog and execution routing"),
         AuraFeatureContract(AuraDestination.SKILLS, AuraFeatureStatus.FOUNDATION_ONLY, "Skill discovery and learning lifecycle"),
-        AuraFeatureContract(AuraDestination.SETTINGS, AuraFeatureStatus.PLANNED, "Application and model configuration")
+        AuraFeatureContract(AuraDestination.SETTINGS, AuraFeatureStatus.IMPLEMENTED, "Model library and API profiles")
     )
 
     fun contractFor(destination: AuraDestination): AuraFeatureContract =
