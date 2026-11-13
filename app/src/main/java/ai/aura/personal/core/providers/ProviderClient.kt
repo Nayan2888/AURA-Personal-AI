@@ -1,28 +1,42 @@
 package ai.aura.personal.core.providers
 
 import ai.aura.personal.core.chat.ChatMessage
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.net.URLEncoder
+import javax.net.ssl.SSLException
 import javax.net.ssl.HttpsURLConnection
 import org.json.JSONArray
 import org.json.JSONObject
 
 internal class ProviderClient(private val store: ProviderStore) {
     fun listModels(profile: ProviderProfile): List<String> {
+        val gemini = usesNativeGemini(profile)
         val ids = linkedSetOf<String>()
-        var path = "/models"
+        var path = if (gemini) "/models?pageSize=100" else "/models"
         repeat(30) {
             val page = request(profile, path)
-            val models = page.getJSONArray("data")
-            for (index in 0 until models.length()) ids.add(models.getJSONObject(index).getString("id"))
-            if (profile.protocol != ProviderProtocol.CLAUDE || !page.optBoolean("has_more")) return ids.toList()
-            val cursor = URLEncoder.encode(page.getString("last_id"), "UTF-8")
-            path = "/models?after_id=" + cursor
+            if (gemini) {
+                ids.addAll(GeminiText.chatModels(page))
+                val token = page.optString("nextPageToken")
+                if (token.isBlank()) return ids.toList()
+                path = "/models?pageSize=100&pageToken=" + URLEncoder.encode(token, "UTF-8")
+            } else {
+                val models = page.getJSONArray("data")
+                for (index in 0 until models.length()) ids.add(models.getJSONObject(index).getString("id"))
+                if (profile.protocol != ProviderProtocol.CLAUDE || !page.optBoolean("has_more")) return ids.toList()
+                path = "/models?after_id=" + URLEncoder.encode(page.getString("last_id"), "UTF-8")
+            }
         }
         error("Provider returned too many model pages. Enter the model ID manually.")
     }
 
     fun generate(profile: ProviderProfile, history: List<ChatMessage>, prompt: String): String {
         require(profile.model.isNotBlank()) { "Select a provider model first." }
+        if (usesNativeGemini(profile)) {
+            val response = request(profile, GeminiText.generationPath(profile.model), GeminiText.body(history, prompt))
+            return GeminiText.reply(response)
+        }
         val claude = profile.protocol == ProviderProtocol.CLAUDE
         val messages = JSONArray()
         val system = mutableListOf<String>()
@@ -48,16 +62,23 @@ internal class ProviderClient(private val store: ProviderStore) {
         return answer.trim().also { check(it.isNotEmpty()) { "Provider returned no text." } }
     }
 
+    // Exact official endpoint also recognizes existing Gemini profiles without re-entering their keys.
+    private fun usesNativeGemini(profile: ProviderProfile): Boolean =
+        profile.protocol == ProviderProtocol.OPENAI && profile.endpoint().toString() == ProviderPreset.GEMINI.baseUrl
+
     private fun request(profile: ProviderProfile, path: String, body: JSONObject? = null): JSONObject {
-        val base = profile.endpoint().toString()
+        val gemini = usesNativeGemini(profile)
+        val base = if (gemini) "https://generativelanguage.googleapis.com/v1beta" else profile.endpoint().toString()
         val connection = java.net.URI(base + path).toURL().openConnection() as HttpsURLConnection
         try {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 15_000
-            connection.readTimeout = 60_000
+            connection.readTimeout = if (body == null) 30_000 else 90_000
             connection.setRequestProperty("Accept", "application/json")
             val key = store.key(profile)
-            if (profile.protocol == ProviderProtocol.CLAUDE) {
+            if (gemini) {
+                connection.setRequestProperty("x-goog-api-key", key)
+            } else if (profile.protocol == ProviderProtocol.CLAUDE) {
                 connection.setRequestProperty("x-api-key", key)
                 connection.setRequestProperty("anthropic-version", "2023-06-01")
             } else connection.setRequestProperty("Authorization", "Bearer $key")
@@ -65,14 +86,18 @@ internal class ProviderClient(private val store: ProviderStore) {
                 connection.requestMethod = "POST"
                 connection.doOutput = true
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+                val payload = body.toString().toByteArray(Charsets.UTF_8)
+                connection.setFixedLengthStreamingMode(payload.size)
+                connection.outputStream.use { it.write(payload) }
             }
             val status = connection.responseCode
             check(status in 200..299) {
                 when (status) {
                     401, 403 -> "Provider HTTP $status. Check your key and model permissions."
+                    400 -> "Provider HTTP 400. Check that the selected model supports text chat and your account can access it."
                     429 -> "Provider HTTP 429. Check rate limits and account quota."
                     404 -> "Provider HTTP 404. Check the endpoint and model ID."
+                    500, 502, 503, 504 -> "Provider HTTP $status. The service could not complete the request. Try again later."
                     in 300..399 -> "Provider redirected the request. Update the endpoint before sending your key again."
                     else -> "Provider returned HTTP $status."
                 }
@@ -91,6 +116,13 @@ internal class ProviderClient(private val store: ProviderStore) {
             return try { JSONObject(raw) } catch (_: org.json.JSONException) {
                 error("Provider returned invalid JSON.")
             }
+        } catch (_: SocketTimeoutException) {
+            error(if (body == null) "${profile.name} timed out while listing models. Check your connection and try again."
+                else "${profile.name} did not return a reply in time. Retry this message or select a faster chat model in Settings.")
+        } catch (_: UnknownHostException) {
+            error("Could not reach ${profile.name}. Check your internet connection and endpoint.")
+        } catch (_: SSLException) {
+            error("Secure connection to ${profile.name} failed. Check your connection and endpoint.")
         } finally {
             connection.disconnect()
         }

@@ -13,7 +13,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +37,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,6 +66,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.chat.ChatSession
@@ -74,6 +90,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private val AuraColors = darkColorScheme(
+    primary = Color(0xFFA6F0CD), onPrimary = Color(0xFF12362A),
+    primaryContainer = Color(0xFF214B3C), onPrimaryContainer = Color(0xFFD1F8E6),
+    background = Color(0xFF10171B), onBackground = Color(0xFFECF4F1),
+    surface = Color(0xFF151F24), onSurface = Color(0xFFECF4F1),
+    surfaceVariant = Color(0xFF202E34), onSurfaceVariant = Color(0xFFADBFBE),
+    outline = Color(0xFF627975), errorContainer = Color(0xFF402A2F),
+    onErrorContainer = Color(0xFFFFD9DB)
+)
 
 private fun displayName(context: Context, uri: Uri): String {
     context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
@@ -131,6 +157,7 @@ private fun AuraRoot() {
     var confirmProvider by remember { mutableStateOf<ProviderProfile?>(null) }
     var availableModels by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
     var isProcessing by remember { mutableStateOf(false) }
+    var failedMessageId by remember { mutableStateOf<String?>(null) }
     var runtimeError by remember { mutableStateOf<String?>(null) }
     var learningConsent by remember { mutableStateOf(learningConsentStore.isGranted()) }
     var showLearningConsent by remember { mutableStateOf(false) }
@@ -258,6 +285,7 @@ private fun AuraRoot() {
         sessionName = "AURA Chat"
         draft = ""
         runtimeError = null
+        failedMessageId = null
         activeProvider = profile
         selectedDestination = AuraDestination.CHAT
     }
@@ -299,23 +327,28 @@ private fun AuraRoot() {
         feedbackStates[assistantMessage.id] = updated.outcome
     }
 
-    fun sendMessage() {
-        val text = draft.trim()
+    fun sendMessage(retry: Boolean = false) {
+        val last = session.state.messages.lastOrNull()
+        if (retry && (last?.id != failedMessageId || last?.role != ChatMessage.Role.USER)) return
+        val text = if (retry) last?.content.orEmpty() else draft.trim()
         if (text.isEmpty()) return
         val provider = activeProvider
         if (isProcessing || settingsBusy || modelLoading || (provider == null && loadedModel == null)) return
         val messageId = "message-" + (session.state.messages.size + 1)
-        val userMessage = ChatMessage(
+        val userMessage = if (retry) checkNotNull(last) else ChatMessage(
             id = messageId,
             role = ChatMessage.Role.USER,
             content = text,
             createdAtEpochMs = System.currentTimeMillis()
         )
-        val updated = session.appendMessage(userMessage)
-        session = updated
-        historyStore.save(updated, sessionName)
-        refreshHistory()
-        draft = ""
+        val updated = if (retry) session else session.appendMessage(userMessage)
+        if (!retry) {
+            session = updated
+            historyStore.save(updated, sessionName)
+            refreshHistory()
+            draft = ""
+        }
+        failedMessageId = null
         runtimeError = null
         isProcessing = true
 
@@ -346,6 +379,7 @@ private fun AuraRoot() {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                failedMessageId = userMessage.id
                 runtimeError = error.message ?: "Inference failed."
             } finally {
                 isProcessing = false
@@ -357,12 +391,14 @@ private fun AuraRoot() {
         if (isProcessing) return
         val restored = historyStore.load(id) ?: return
         activeProvider = null
+        failedMessageId = null
+        runtimeError = null
         session = restored
         history.firstOrNull { it.id == id }?.let { sessionName = it.title }
         selectedDestination = AuraDestination.CHAT
     }
 
-    MaterialTheme(colorScheme = darkColorScheme()) {
+    MaterialTheme(colorScheme = AuraColors) {
         confirmProvider?.let { profile ->
             AlertDialog(
                 onDismissRequest = { confirmProvider = null },
@@ -438,18 +474,20 @@ private fun AuraRoot() {
             topBar = {
                 TopAppBar(
                     title = {
-                        Column {
-                            Text(sessionName, style = MaterialTheme.typography.titleLarge)
-                            Text(
-                                when {
-                                    activeProvider != null -> "Cloud API · " + activeProvider?.name
-                                    modelLoading -> "Loading local model…"
-                                    loadedModel != null -> "Local model · " + loadedModel?.name
-                                    else -> "No local model loaded"
-                                },
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        }                    },
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            AuraOrb(36)
+                            Column {
+                                Text(if (selectedDestination == AuraDestination.CHAT) sessionName else selectedDestination.title,
+                                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                val route = activeProvider?.let { it.name + " · " + it.model }
+                                    ?: if (modelLoading) "Loading local model…" else loadedModel?.name ?: "On-device · no model loaded"
+                                Text(route, style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                     actions = {
                         TextButton(onClick = { menuExpanded = true }) { Text("⋮", style = MaterialTheme.typography.headlineSmall) }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
@@ -457,6 +495,8 @@ private fun AuraRoot() {
                                 saveCurrentSession()
                                 session = ChatSession("session-${System.currentTimeMillis()}")
                                 sessionName = "AURA Chat"
+                                failedMessageId = null
+                                runtimeError = null
                                 menuExpanded = false
                             })
                             DropdownMenuItem(text = { Text("Rename chat") }, onClick = {
@@ -466,6 +506,8 @@ private fun AuraRoot() {
                             })
                             DropdownMenuItem(text = { Text("Clear conversation") }, enabled = !isProcessing, onClick = {
                                 session = ChatSession(session.id)
+                                failedMessageId = null
+                                runtimeError = null
                                 menuExpanded = false
                             })
                             DropdownMenuItem(
@@ -488,15 +530,18 @@ private fun AuraRoot() {
                 )
             },
             bottomBar = {
-                Surface(tonalElevation = 8.dp, modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
+                Surface(color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
                     Column {
-                        if (selectedDestination == AuraDestination.CHAT) Column(modifier = Modifier.fillMaxWidth().imePadding().padding(12.dp)) {
+                        if (selectedDestination == AuraDestination.CHAT) Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f), minLines = 1, maxLines = 4, placeholder = { Text("Message AURA…") })
-                                TextButton(onClick = { sendMessage() }, enabled = draft.isNotBlank() && (loadedModel != null || activeProvider != null) && !isProcessing && !settingsBusy && !modelLoading) { Text("➤", style = MaterialTheme.typography.headlineSmall) }
+                                OutlinedTextField(value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(20.dp),
+                                    minLines = 1, maxLines = 4, placeholder = { Text("Message AURA…") })
+                                Button(onClick = { sendMessage() }, contentPadding = PaddingValues(horizontal = 14.dp),
+                                    enabled = draft.isNotBlank() && (loadedModel != null || activeProvider != null) && !isProcessing && !settingsBusy && !modelLoading) { Text("Send") }
                             }
                         }
-                        NavigationBar {
+                        NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                             val destinations = listOf(
                                 AuraDestination.CHAT,
                                 AuraDestination.TOOLS,
@@ -512,7 +557,8 @@ private fun AuraRoot() {
                                         selectedDestination = destination
                                         if (destination == AuraDestination.MEMORY) refreshHistory()
                                     },
-                                    icon = { Text(icons[index]) },
+                                    colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.primaryContainer),
+                                    icon = { Text(icons[index], fontSize = 19.sp) },
                                     label = { Text(destination.title) }
                                 )
                             }
@@ -530,6 +576,9 @@ private fun AuraRoot() {
                         modelLoading = modelLoading,
                         isProcessing = isProcessing,
                         errorMessage = runtimeError,
+                        onRetry = if (failedMessageId != null && !settingsBusy && !modelLoading &&
+                            (loadedModel != null || activeProvider != null)) { { sendMessage(retry = true) } } else null,
+                        onSettings = { selectedDestination = AuraDestination.SETTINGS },
                         learningEnabled = learningConsent,
                         feedbackStates = feedbackStates,
                         onFeedback = ::applyExperienceFeedback
@@ -600,56 +649,43 @@ private fun ChatScreen(
     modelLoading: Boolean,
     isProcessing: Boolean,
     errorMessage: String?,
+    onRetry: (() -> Unit)?,
+    onSettings: () -> Unit,
     learningEnabled: Boolean,
     feedbackStates: Map<String, ExperienceRecord.Outcome>,
     onFeedback: (String, ExperienceRecord.Outcome, String?) -> Unit
 ) {
+    val listState = rememberLazyListState()
+    val messages = session.state.messages
+    LaunchedEffect(session.id, messages.size, isProcessing, errorMessage) {
+        val count = messages.size + (if (messages.isEmpty()) 1 else 0) +
+            (if (isProcessing || errorMessage != null) 1 else 0)
+        if (count > 0) listState.scrollToItem(count - 1)
+    }
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        if (messages.isEmpty()) item {
+            Column(
+                modifier = Modifier.fillMaxWidth().background(
+                    Brush.linearGradient(listOf(Color(0xFF214235), Color(0xFF18262D))),
+                    RoundedCornerShape(24.dp)
+                ).padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        when {
-                            modelLoading -> "AURA local model is loading…"
-                            providerName != null -> "Cloud API selected"
-                            modelReady -> "AURA is ready"
-                            else -> "AURA chat is waiting for a local model"
-                        },
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Spacer(modifier = Modifier.size(4.dp))
-                    Text(
-                        if (modelReady) {
-                            providerName?.let { "Chat is routed to " + it + "." }
-                                ?: "The local model is initialized. Send a message to run on-device inference."
-                        } else {
-                            "Open Settings to install and load a .litertlm model, or configure a cloud API."
-                        }
-                    )
-                }
+                AuraOrb(62)
+                Text("Your space to think", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(when {
+                    providerName != null -> "New messages in this chat go to $providerName."
+                    modelLoading -> "Initializing your local model…"
+                    modelReady -> "Your local model is loaded. Send a message to begin."
+                    else -> "Load a local model or choose an API to start chatting."
+                }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!modelReady && !modelLoading) Button(onClick = onSettings) { Text("Models & APIs") }
             }
-        }
-        errorMessage?.let { error ->
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Inference status", style = MaterialTheme.typography.labelLarge)
-                        Text(error, color = MaterialTheme.colorScheme.onErrorContainer)
-                    }
-                }
-            }
-        }
-        if (isProcessing) {
-            item { Text("AURA is generating a real local response…", style = MaterialTheme.typography.bodyMedium) }
         }
         items(session.state.messages, key = { it.id }) { message ->
             val isUser = message.role == ChatMessage.Role.USER
@@ -658,13 +694,16 @@ private fun ChatScreen(
                 horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
             ) {
                 Card(
-                    modifier = Modifier.fillMaxWidth(0.88f),
+                    modifier = Modifier.widthIn(max = 540.dp).fillMaxWidth(if (isUser) 0.83f else 0.94f),
+                    shape = RoundedCornerShape(20.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (isUser) Color(0xFF304FFE) else MaterialTheme.colorScheme.surfaceVariant
+                        containerColor = if (isUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                     )
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
-                        Text(if (isUser) "YOU" else "AURA", style = MaterialTheme.typography.labelSmall)
+                        Text(if (isUser) "You" else "AURA", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.size(4.dp))
                         Text(message.content)
 
@@ -737,6 +776,31 @@ private fun ChatScreen(
                 }
             }
         }
+        if (isProcessing) item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(providerName?.let { "Waiting for $it…" } ?: "Generating on device…",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        } else if (errorMessage != null) item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Reply unavailable", fontWeight = FontWeight.SemiBold)
+                    Text(errorMessage, color = MaterialTheme.colorScheme.onErrorContainer)
+                    if (onRetry != null) TextButton(onClick = onRetry) { Text("Retry message") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AuraOrb(diameter: Int) {
+    Canvas(Modifier.size(diameter.dp)) {
+        val unit = size.minDimension
+        drawCircle(Brush.radialGradient(listOf(Color(0xFF5FCBA1), Color(0xFF1D5749), Color(0xFF172C2C))))
+        drawCircle(Color(0xFFB5F5D9), radius = unit * 0.34f, style = Stroke(width = unit * 0.018f))
+        drawCircle(Color(0xFFDDFCEF), radius = unit * 0.13f)
     }
 }
 
