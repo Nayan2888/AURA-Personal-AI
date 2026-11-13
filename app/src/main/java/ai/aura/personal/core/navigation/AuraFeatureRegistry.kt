@@ -23,7 +23,7 @@ object AuraFeatureRegistry {
         AuraFeatureContract(AuraDestination.MEMORY, AuraFeatureStatus.IMPLEMENTED, "Saved conversation history"),
         AuraFeatureContract(AuraDestination.TOOLS, AuraFeatureStatus.FOUNDATION_ONLY, "Tool catalog and execution routing"),
         AuraFeatureContract(AuraDestination.SKILLS, AuraFeatureStatus.FOUNDATION_ONLY, "Skill discovery and learning lifecycle"),
-        AuraFeatureContract(AuraDestination.SETTINGS, AuraFeatureStatus.PLANNED, "Application and model configuration")
+        AuraFeatureContract(AuraDestination.SETTINGS, AuraFeatureStatus.IMPLEMENTED, "Model library and API profiles")
     )
 
     fun contractFor(destination: AuraDestination): AuraFeatureContract =

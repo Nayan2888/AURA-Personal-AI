@@ -1,12 +1,14 @@
 package ai.aura.personal
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
-import android.widget.ImageView
 import java.io.File
+import ai.aura.personal.core.providers.ProviderClient
+import ai.aura.personal.core.providers.ProviderProfile
+import ai.aura.personal.core.providers.ProviderStore
+import kotlinx.coroutines.CancellationException
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -18,7 +20,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -26,7 +27,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -54,10 +54,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import ai.aura.personal.core.chat.ChatMessage
 import ai.aura.personal.core.chat.ChatSession
 import ai.aura.personal.core.history.ChatHistoryStore
@@ -73,19 +71,14 @@ import ai.aura.personal.core.inference.LocalModelStore
 import ai.aura.personal.core.navigation.AuraDestination
 import ai.aura.personal.core.versions.ModelVersionStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-private data class SelectedAttachment(
-    val uri: Uri,
-    val name: String,
-    val mimeType: String
-)
 
 private fun displayName(context: Context, uri: Uri): String {
     context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
         val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-        if (index >= 0 && cursor.moveToFirst()) return cursor.getString(index)
+        if (index >= 0 && cursor.moveToFirst()) cursor.getString(index)?.let { return it }
     }
     return uri.lastPathSegment ?: "Selected file"
 }
@@ -103,6 +96,8 @@ private fun AuraRoot() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val historyStore = remember { ChatHistoryStore(context) }
     val modelStore = remember { LocalModelStore(context) }
+    val providerStore = remember { ProviderStore(context) }
+    val providerClient = remember { ProviderClient(providerStore) }
     val modelVersionStore = remember { ModelVersionStore(context.filesDir) }
     val evaluationReportStore = remember { EvaluationReportStore(context.filesDir) }
     val experienceStore = remember { ExperienceStore(context) }
@@ -118,16 +113,23 @@ private fun AuraRoot() {
     var session by remember { mutableStateOf(ChatSession("main-session")) }
     var sessionName by remember { mutableStateOf("AURA Chat") }
     var draft by remember { mutableStateOf("") }
-    var selectedAttachment by remember { mutableStateOf<SelectedAttachment?>(null) }
     var selectedDestination by remember { mutableStateOf(AuraDestination.CHAT) }
     var menuExpanded by remember { mutableStateOf(false) }
     var showInfo by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var renameDraft by remember { mutableStateOf("") }
     var history by remember { mutableStateOf(historyStore.list()) }
-    var selectedModelPath by remember { mutableStateOf(modelStore.selectedModel()?.absolutePath) }
-    var modelRevision by remember { mutableStateOf(0) }
+    var models by remember { mutableStateOf(modelStore.installedModels()) }
+    var loadedModel by remember { mutableStateOf<File?>(null) }
     var modelLoading by remember { mutableStateOf(false) }
+    var settingsBusy by remember { mutableStateOf(false) }
+    var transferJob by remember { mutableStateOf<Job?>(null) }
+    var modelStatus by remember { mutableStateOf<String?>(null) }
+    var apiStatus by remember { mutableStateOf<String?>(null) }
+    var providers by remember { mutableStateOf(providerStore.profiles()) }
+    var activeProvider by remember { mutableStateOf<ProviderProfile?>(null) }
+    var confirmProvider by remember { mutableStateOf<ProviderProfile?>(null) }
+    var availableModels by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
     var isProcessing by remember { mutableStateOf(false) }
     var runtimeError by remember { mutableStateOf<String?>(null) }
     var learningConsent by remember { mutableStateOf(learningConsentStore.isGranted()) }
@@ -135,7 +137,6 @@ private fun AuraRoot() {
     var datasetEntryCount by remember { mutableStateOf(0) }
     var datasetStatus by remember { mutableStateOf<String?>(null) }
     val feedbackStates = remember { mutableStateMapOf<String, ExperienceRecord.Outcome>() }
-    val attachments = remember { mutableStateMapOf<String, SelectedAttachment>() }
 
     fun refreshHistory() {
         history = historyStore.list()
@@ -172,55 +173,97 @@ private fun AuraRoot() {
         }
     }
 
+    fun manageModel(transfer: Boolean = false, action: suspend () -> Unit) {
+        if (settingsBusy || modelLoading || isProcessing) return
+        settingsBusy = true
+        modelStatus = null
+        val job = scope.launch {
+            try {
+                action()
+            } catch (error: CancellationException) {
+                if (transfer) modelStatus = "Transfer cancelled."
+                throw error
+            } catch (error: Exception) {
+                modelStatus = error.message ?: "Model operation failed."
+            } finally {
+                models = modelStore.installedModels()
+                transferJob = null
+                settingsBusy = false
+            }
+        }
+        if (transfer && job.isActive) transferJob = job
+    }
+
+    suspend fun loadModel(file: File) {
+        modelLoading = true
+        runtimeError = null
+        try {
+            withContext(Dispatchers.IO) { runtime.load(file) }
+            loadedModel = file
+            modelStore.select(file)
+            modelStatus = "Loaded on device."
+        } finally {
+            modelLoading = false
+        }
+    }
+
+    fun transferProgress(bytes: Long, total: Long?) {
+        val amount = android.text.format.Formatter.formatFileSize(context, bytes)
+        val expected = total?.let { " / " + android.text.format.Formatter.formatFileSize(context, it) }.orEmpty()
+        modelStatus = "Transferred " + amount + expected
+    }
+
     val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            val name = displayName(context, uri)
-            scope.launch {
-                runtimeError = null
-                runCatching {
-                    withContext(Dispatchers.IO) { modelStore.importModel(uri, name) }
-                }.onSuccess { imported ->
-                    selectedModelPath = imported.absolutePath
-                    modelRevision += 1
-                }.onFailure { error ->
-                    runtimeError = error.message ?: "Local model import failed."
-                }
+        if (uri != null) manageModel(transfer = true) {
+            val file = withContext(Dispatchers.IO) {
+                modelStore.importModel(uri, displayName(context, uri), ::transferProgress)
+            }
+            modelStatus = "Installed " + file.name + ". Select Load on device to initialize it."
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        modelStore.selectedModel()?.let { file ->
+            try {
+                loadModel(file)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                runtimeError = error.message ?: "Local model initialization failed."
+                modelStatus = runtimeError
             }
         }
     }
 
-    LaunchedEffect(selectedModelPath, modelRevision) {
-        modelLoading = selectedModelPath != null
-        runtimeError = null
-        if (selectedModelPath == null) {
-            runtime.close()
-        } else {
-            runCatching {
-                runtime.load(File(selectedModelPath!!))
-            }.onFailure { error ->
-                runtimeError = error.message ?: "Local model initialization failed."
+    fun manageApi(action: suspend () -> Unit) {
+        if (settingsBusy || modelLoading || isProcessing) return
+        settingsBusy = true
+        apiStatus = null
+        scope.launch {
+            try {
+                action()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                apiStatus = error.message ?: "API operation failed."
+            } finally {
+                settingsBusy = false
             }
         }
-        modelLoading = false
+    }
+
+    fun selectProvider(profile: ProviderProfile?) {
+        saveCurrentSession()
+        session = ChatSession("session-" + java.util.UUID.randomUUID())
+        sessionName = "AURA Chat"
+        draft = ""
+        runtimeError = null
+        activeProvider = profile
+        selectedDestination = AuraDestination.CHAT
     }
 
     DisposableEffect(Unit) {
         onDispose { runtime.close() }
-    }
-
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } catch (_: SecurityException) {
-                // Some providers do not offer persistable permissions.
-            }
-            selectedAttachment = SelectedAttachment(
-                uri = uri,
-                name = displayName(context, uri),
-                mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
-            )
-        }
     }
 
     fun applyExperienceFeedback(
@@ -258,33 +301,32 @@ private fun AuraRoot() {
 
     fun sendMessage() {
         val text = draft.trim()
-        val attachment = selectedAttachment
-        if (text.isEmpty() && attachment == null) return
-        if (isProcessing || !runtime.isReady()) return
-
+        if (text.isEmpty()) return
+        val provider = activeProvider
+        if (isProcessing || settingsBusy || modelLoading || (provider == null && loadedModel == null)) return
         val messageId = "message-" + (session.state.messages.size + 1)
         val userMessage = ChatMessage(
             id = messageId,
             role = ChatMessage.Role.USER,
-            content = text.ifEmpty { "Attachment" },
+            content = text,
             createdAtEpochMs = System.currentTimeMillis()
         )
         val updated = session.appendMessage(userMessage)
         session = updated
-        if (attachment != null) attachments[messageId] = attachment
         historyStore.save(updated, sessionName)
         refreshHistory()
         draft = ""
-        selectedAttachment = null
         runtimeError = null
         isProcessing = true
 
         scope.launch {
             try {
-                val assistantMessage = runtime.respond(
-                    history = updated.state.messages.dropLast(1),
-                    userMessage = userMessage
-                )
+                val messages = updated.state.messages.dropLast(1)
+                val assistantMessage = if (provider == null) runtime.respond(messages, userMessage) else {
+                    val answer = withContext(Dispatchers.IO) { providerClient.generate(provider, messages, text) }
+                    ChatMessage("assistant-" + java.util.UUID.randomUUID(), ChatMessage.Role.ASSISTANT,
+                        answer, System.currentTimeMillis())
+                }
                 val completed = updated.appendMessage(assistantMessage)
                 session = completed
                 historyStore.save(completed, sessionName)
@@ -301,8 +343,10 @@ private fun AuraRoot() {
                 }
 
                 refreshHistory()
-            } catch (error: Throwable) {
-                runtimeError = error.message ?: "Local inference failed."
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                runtimeError = error.message ?: "Inference failed."
             } finally {
                 isProcessing = false
             }
@@ -310,14 +354,28 @@ private fun AuraRoot() {
     }
 
     fun openHistory(id: String) {
+        if (isProcessing) return
         val restored = historyStore.load(id) ?: return
+        activeProvider = null
         session = restored
         history.firstOrNull { it.id == id }?.let { sessionName = it.title }
-        attachments.clear()
         selectedDestination = AuraDestination.CHAT
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
+        confirmProvider?.let { profile ->
+            AlertDialog(
+                onDismissRequest = { confirmProvider = null },
+                title = { Text("Use " + profile.name + " for chat?") },
+                text = { Text("A new chat will open. Messages and its history will be sent to " +
+                    profile.baseUrl + ". The provider may charge for inference.") },
+                confirmButton = { TextButton(onClick = {
+                    confirmProvider = null
+                    selectProvider(profile)
+                }) { Text("Use cloud API") } },
+                dismissButton = { TextButton(onClick = { confirmProvider = null }) { Text("Cancel") } }
+            )
+        }
         if (showInfo) {
             AlertDialog(
                 onDismissRequest = { showInfo = false },
@@ -384,9 +442,10 @@ private fun AuraRoot() {
                             Text(sessionName, style = MaterialTheme.typography.titleLarge)
                             Text(
                                 when {
+                                    activeProvider != null -> "Cloud API · " + activeProvider?.name
                                     modelLoading -> "Loading local model…"
-                                    runtime.isReady() -> "Local model: " + (modelStore.selectedModelName() ?: "ready")
-                                    else -> "No local model installed"
+                                    loadedModel != null -> "Local model · " + loadedModel?.name
+                                    else -> "No local model loaded"
                                 },
                                 style = MaterialTheme.typography.labelSmall
                             )
@@ -394,12 +453,10 @@ private fun AuraRoot() {
                     actions = {
                         TextButton(onClick = { menuExpanded = true }) { Text("⋮", style = MaterialTheme.typography.headlineSmall) }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                            DropdownMenuItem(text = { Text("New chat") }, onClick = {
+                            DropdownMenuItem(text = { Text("New chat") }, enabled = !isProcessing, onClick = {
                                 saveCurrentSession()
                                 session = ChatSession("session-${System.currentTimeMillis()}")
                                 sessionName = "AURA Chat"
-                                attachments.clear()
-                                selectedAttachment = null
                                 menuExpanded = false
                             })
                             DropdownMenuItem(text = { Text("Rename chat") }, onClick = {
@@ -407,10 +464,8 @@ private fun AuraRoot() {
                                 showRename = true
                                 menuExpanded = false
                             })
-                            DropdownMenuItem(text = { Text("Clear conversation") }, onClick = {
+                            DropdownMenuItem(text = { Text("Clear conversation") }, enabled = !isProcessing, onClick = {
                                 session = ChatSession(session.id)
-                                attachments.clear()
-                                selectedAttachment = null
                                 menuExpanded = false
                             })
                             DropdownMenuItem(
@@ -420,16 +475,8 @@ private fun AuraRoot() {
                                     menuExpanded = false
                                 }
                             )
-                            DropdownMenuItem(text = { Text("Install local model") }, onClick = {
-                                modelPicker.launch(arrayOf("application/octet-stream", "*/*"))
-                                menuExpanded = false
-                            })
-                            DropdownMenuItem(text = { Text("Remove local model") }, enabled = selectedModelPath != null, onClick = {
-                                runtime.close()
-                                modelStore.selectedModel()?.delete()
-                                modelStore.clearSelection()
-                                selectedModelPath = null
-                                runtimeError = null
+                            DropdownMenuItem(text = { Text("Models & APIs") }, onClick = {
+                                selectedDestination = AuraDestination.SETTINGS
                                 menuExpanded = false
                             })
                             DropdownMenuItem(text = { Text("Session info") }, onClick = {
@@ -443,28 +490,10 @@ private fun AuraRoot() {
             bottomBar = {
                 Surface(tonalElevation = 8.dp, modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
                     Column {
-                        Column(modifier = Modifier.fillMaxWidth().imePadding().padding(12.dp)) {
-                            selectedAttachment?.let { attachment ->
-                                Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Text("📎 ${attachment.name}")
-                                        if (attachment.mimeType.startsWith("image/")) {
-                                            AndroidView(
-                                                factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.CENTER_CROP; adjustViewBounds = true } },
-                                                update = { it.setImageURI(attachment.uri) },
-                                                modifier = Modifier.fillMaxWidth().height(140.dp).padding(top = 8.dp).clip(RoundedCornerShape(10.dp))
-                                            )
-                                        }
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                            TextButton(onClick = { selectedAttachment = null }) { Text("Remove") }
-                                        }
-                                    }
-                                }
-                            }
+                        if (selectedDestination == AuraDestination.CHAT) Column(modifier = Modifier.fillMaxWidth().imePadding().padding(12.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                TextButton(onClick = { picker.launch(arrayOf("image/*", "application/pdf", "text/*", "application/octet-stream")) }) { Text("＋", style = MaterialTheme.typography.headlineSmall) }
                                 OutlinedTextField(value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f), minLines = 1, maxLines = 4, placeholder = { Text("Message AURA…") })
-                                TextButton(onClick = { sendMessage() }, enabled = (draft.isNotBlank() || selectedAttachment != null) && runtime.isReady() && !isProcessing) { Text("➤", style = MaterialTheme.typography.headlineSmall) }
+                                TextButton(onClick = { sendMessage() }, enabled = draft.isNotBlank() && (loadedModel != null || activeProvider != null) && !isProcessing && !settingsBusy && !modelLoading) { Text("➤", style = MaterialTheme.typography.headlineSmall) }
                             }
                         }
                         NavigationBar {
@@ -496,8 +525,8 @@ private fun AuraRoot() {
                 when (selectedDestination) {
                     AuraDestination.CHAT -> ChatScreen(
                         session = session,
-                        attachments = attachments,
-                        modelReady = runtime.isReady(),
+                        modelReady = loadedModel != null || activeProvider != null,
+                        providerName = activeProvider?.name,
                         modelLoading = modelLoading,
                         isProcessing = isProcessing,
                         errorMessage = runtimeError,
@@ -515,9 +544,48 @@ private fun AuraRoot() {
                         datasetStatus = datasetStatus,
                         onBuildDataset = ::buildLearningDataset
                     )
+                    AuraDestination.SETTINGS -> ModelSettingsScreen(
+                        models, loadedModel, providers, activeProvider, settingsBusy || modelLoading || isProcessing,
+                        modelStatus, apiStatus, availableModels,
+                        onImport = { modelPicker.launch(arrayOf("application/octet-stream", "*/*")) },
+                        onCancelTransfer = transferJob?.let { job -> { job.cancel() } },
+                        onDownload = { url, name, sha -> manageModel(transfer = true) {
+                            val file = withContext(Dispatchers.IO) { modelStore.downloadModel(url, name, sha, ::transferProgress) }
+                            modelStatus = "Downloaded " + file.name + if (sha == null) " · no checksum supplied." else " · SHA-256 matched."
+                        } },
+                        onLoad = { file -> manageModel { loadModel(file) } },
+                        onUnload = { manageModel {
+                            withContext(Dispatchers.IO) { runtime.close() }
+                            loadedModel = null
+                            modelStore.select(null)
+                            modelStatus = "Unloaded. Model file is still installed."
+                        } },
+                        onSaveProvider = { profile, key -> manageApi {
+                            withContext(Dispatchers.IO) { providerStore.save(profile, key) }
+                            if (activeProvider?.id == profile.id) selectProvider(null)
+                            availableModels = availableModels - profile.id
+                            providers = providerStore.profiles()
+                            apiStatus = "Saved on this device. Fetch models to test access."
+                        } },
+                        onRemoveProvider = { profile -> manageApi {
+                            withContext(Dispatchers.IO) { providerStore.remove(profile) }
+                            if (activeProvider?.id == profile.id) selectProvider(null)
+                            availableModels = availableModels - profile.id
+                            providers = providerStore.profiles()
+                            apiStatus = "API profile removed."
+                        } },
+                        onListModels = { profile -> manageApi {
+                            availableModels = availableModels - profile.id
+                            val ids = withContext(Dispatchers.IO) { providerClient.listModels(profile) }
+                            availableModels = availableModels + (profile.id to ids)
+                            apiStatus = profile.name + " returned " + ids.size + " model IDs. Open Edit to select one."
+                        } },
+                        onUseProvider = { profile ->
+                            if (profile == null) selectProvider(null) else confirmProvider = profile
+                        }
+                    )
                     AuraDestination.TOOLS,
-                    AuraDestination.SKILLS,
-                    AuraDestination.SETTINGS -> FeatureStatusScreen(selectedDestination)
+                    AuraDestination.SKILLS -> FeatureStatusScreen(selectedDestination)
                 }
             }
         }
@@ -527,8 +595,8 @@ private fun AuraRoot() {
 @Composable
 private fun ChatScreen(
     session: ChatSession,
-    attachments: Map<String, SelectedAttachment>,
     modelReady: Boolean,
+    providerName: String?,
     modelLoading: Boolean,
     isProcessing: Boolean,
     errorMessage: String?,
@@ -549,6 +617,7 @@ private fun ChatScreen(
                     Text(
                         when {
                             modelLoading -> "AURA local model is loading…"
+                            providerName != null -> "Cloud API selected"
                             modelReady -> "AURA is ready"
                             else -> "AURA chat is waiting for a local model"
                         },
@@ -557,9 +626,10 @@ private fun ChatScreen(
                     Spacer(modifier = Modifier.size(4.dp))
                     Text(
                         if (modelReady) {
-                            "Real on-device inference is connected. Responses are generated by the installed local model."
+                            providerName?.let { "Chat is routed to " + it + "." }
+                                ?: "The local model is initialized. Send a message to run on-device inference."
                         } else {
-                            "Install a .litertlm model from the top-right menu. AURA will not fabricate an assistant response without a real model."
+                            "Open Settings to install and load a .litertlm model, or configure a cloud API."
                         }
                     )
                 }
@@ -662,22 +732,7 @@ private fun ChatScreen(
                             }
                         }
 
-                        attachments[message.id]?.let { attachment ->
-                            Spacer(modifier = Modifier.size(8.dp))
-                            Text("📎 " + attachment.name)
-                            if (attachment.mimeType.startsWith("image/")) {
-                                AndroidView(
-                                    factory = {
-                                        ImageView(it).apply {
-                                            scaleType = ImageView.ScaleType.CENTER_CROP
-                                            adjustViewBounds = true
-                                        }
-                                    },
-                                    update = { it.setImageURI(attachment.uri) },
-                                    modifier = Modifier.fillMaxWidth().height(180.dp).padding(top = 6.dp).clip(RoundedCornerShape(10.dp))
-                                )
-                            }
-                        }
+
                     }
                 }
             }
