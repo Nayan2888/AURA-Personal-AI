@@ -12,6 +12,7 @@ enum class AuraDestination(
     val title: String
 ) {
     CHAT("chat", "Chat"),
+    WORK("work", "Work"),
     TOOLS("tools", "Tools"),
     MEMORY("memory", "Memory"),
     SKILLS("skills", "Skills"),

@@ -1,6 +1,12 @@
 package ai.aura.personal
 
 import android.content.Context
+import android.content.Intent
+import ai.aura.personal.core.inference.discoverModels
+import ai.aura.personal.core.inference.DiscoveredModel
+import androidx.compose.material3.FilterChip
+import org.json.JSONArray
+import org.json.JSONObject
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
@@ -155,7 +161,21 @@ private fun AuraRoot() {
     var providers by remember { mutableStateOf(providerStore.profiles()) }
     var activeProvider by remember { mutableStateOf<ProviderProfile?>(null) }
     var confirmProvider by remember { mutableStateOf<ProviderProfile?>(null) }
-    var availableModels by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    val pickerPrefs = remember { context.getSharedPreferences("aura_model_picker", Context.MODE_PRIVATE) }
+    var hiddenModels by remember { mutableStateOf(pickerPrefs.getStringSet("hidden", emptySet()).orEmpty().toSet()) }
+    var availableModels by remember {
+        val cache = runCatching { JSONObject(pickerPrefs.getString("catalog", "{}") ?: "{}") }.getOrElse { JSONObject() }
+        mutableStateOf(cache.keys().asSequence().associateWith { id ->
+            val ids = cache.optJSONArray(id) ?: JSONArray()
+            (0 until ids.length()).map { ids.optString(it) }.filter { it.isNotBlank() }
+        })
+    }
+    var modelDialog by remember { mutableStateOf(false) }
+    var visibilityDialog by remember { mutableStateOf(false) }
+    var discovered by remember { mutableStateOf<List<DiscoveredModel>>(emptyList()) }
+    var scannedFolder by remember { mutableStateOf(pickerPrefs.getString("folder", null)?.let(Uri::parse)) }
+    var partialReply by remember { mutableStateOf("") }
+    var testProvider by remember { mutableStateOf<ProviderProfile?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
     var failedMessageId by remember { mutableStateOf<String?>(null) }
     var runtimeError by remember { mutableStateOf<String?>(null) }
@@ -240,13 +260,44 @@ private fun AuraRoot() {
         modelStatus = "Transferred " + amount + expected
     }
 
-    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) manageModel(transfer = true) {
+    fun importModel(uri: Uri, name: String? = null) {
+        manageModel(transfer = true) {
             val file = withContext(Dispatchers.IO) {
-                modelStore.importModel(uri, displayName(context, uri), ::transferProgress)
+                modelStore.importModel(uri, name ?: displayName(context, uri), ::transferProgress)
             }
-            modelStatus = "Installed " + file.name + ". Select Load on device to initialize it."
+            modelStatus = "Installed " + file.name + ". Select it in chat to load."
         }
+    }
+
+    val modelPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importModel(uri)
+    }
+    suspend fun scanFolder(folder: Uri) {
+        discovered = emptyList()
+        discovered = withContext(Dispatchers.IO) { discoverModels(context.contentResolver, folder) }
+        modelStatus = "Found " + discovered.size + " LiteRT-LM files in the selected folder."
+    }
+
+    val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { folder ->
+        if (folder != null) manageModel {
+            try {
+                context.contentResolver.takePersistableUriPermission(folder, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val previous = scannedFolder
+                if (previous != null && previous != folder) runCatching {
+                    context.contentResolver.releasePersistableUriPermission(previous, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                pickerPrefs.edit().putString("folder", folder.toString()).apply()
+            } catch (_: SecurityException) {
+                pickerPrefs.edit().remove("folder").apply()
+            }
+            scannedFolder = folder
+            scanFolder(folder)
+        }
+    }
+
+    LaunchedEffect(scannedFolder) {
+        val folder = scannedFolder ?: return@LaunchedEffect
+        if (!settingsBusy) manageModel { scanFolder(folder) }
     }
 
     LaunchedEffect(Unit) {
@@ -279,11 +330,18 @@ private fun AuraRoot() {
         }
     }
 
-    fun selectProvider(profile: ProviderProfile?) {
+    fun updateModelCache(values: Map<String, List<String>>) {
+        availableModels = values
+        val json = JSONObject()
+        values.forEach { (id, models) -> json.put(id, JSONArray(models)) }
+        pickerPrefs.edit().putString("catalog", json.toString()).apply()
+    }
+
+    fun selectProvider(profile: ProviderProfile?, keepDraft: Boolean = false) {
         saveCurrentSession()
         session = ChatSession("session-" + java.util.UUID.randomUUID())
         sessionName = "AURA Chat"
-        draft = ""
+        if (!keepDraft) draft = ""
         runtimeError = null
         failedMessageId = null
         activeProvider = profile
@@ -351,12 +409,13 @@ private fun AuraRoot() {
         failedMessageId = null
         runtimeError = null
         isProcessing = true
+        partialReply = ""
 
         scope.launch {
             try {
                 val messages = updated.state.messages.dropLast(1)
                 val assistantMessage = if (provider == null) runtime.respond(messages, userMessage) else {
-                    val answer = withContext(Dispatchers.IO) { providerClient.generate(provider, messages, text) }
+                    val answer = withContext(Dispatchers.IO) { providerClient.generate(provider, messages, text) { partialReply = it } }
                     ChatMessage("assistant-" + java.util.UUID.randomUUID(), ChatMessage.Role.ASSISTANT,
                         answer, System.currentTimeMillis())
                 }
@@ -383,6 +442,7 @@ private fun AuraRoot() {
                 runtimeError = error.message ?: "Inference failed."
             } finally {
                 isProcessing = false
+                partialReply = ""
             }
         }
     }
@@ -398,7 +458,53 @@ private fun AuraRoot() {
         selectedDestination = AuraDestination.CHAT
     }
 
+    val choices = chatModels(models, providers, availableModels)
+    val selectedModelId = activeProvider?.let { ChatModel(it.model, provider = it).id }
+        ?: loadedModel?.let { ChatModel(it.name, file = it).id }
     MaterialTheme(colorScheme = AuraColors) {
+        if (modelDialog || visibilityDialog) ChatModelDialog(
+            choices, selectedModelId, visibilityDialog, hiddenModels,
+            onClose = { modelDialog = false; visibilityDialog = false },
+            onSettings = { modelDialog = false; selectedDestination = AuraDestination.SETTINGS },
+            onChoose = { choice ->
+                modelDialog = false
+                val provider = choice.provider
+                val file = choice.file
+                if (choice.id != selectedModelId) {
+                    if (provider != null) confirmProvider = provider
+                    else if (file != null) manageModel {
+                        try {
+                            if (loadedModel != file) loadModel(file)
+                            if (activeProvider != null) selectProvider(null, keepDraft = true)
+                        } catch (error: CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            runtimeError = error.message ?: "Could not load the local model."
+                            throw error
+                        }
+                    }
+                }
+            },
+            onToggle = { id ->
+                hiddenModels = if (id in hiddenModels) hiddenModels - id else hiddenModels + id
+                pickerPrefs.edit().putStringSet("hidden", hiddenModels).apply()
+            }
+        )
+        testProvider?.let { profile ->
+            AlertDialog(onDismissRequest = { testProvider = null }, title = { Text("Test ${profile.name} reply?") },
+                text = { Text("Send one short test prompt to ${profile.model}. The provider may count it against your quota.") },
+                confirmButton = { TextButton(onClick = {
+                    testProvider = null
+                    manageApi {
+                        apiStatus = "Waiting for ${profile.name} / ${profile.model}…"
+                        val reply = withContext(Dispatchers.IO) {
+                            providerClient.generate(profile, emptyList(), "Reply with the word OK.") { }
+                        }
+                        apiStatus = "${profile.name} replied: " + reply.take(280)
+                    }
+                }) { Text("Send test") } },
+                dismissButton = { TextButton(onClick = { testProvider = null }) { Text("Cancel") } })
+        }
         confirmProvider?.let { profile ->
             AlertDialog(
                 onDismissRequest = { confirmProvider = null },
@@ -407,7 +513,7 @@ private fun AuraRoot() {
                     profile.baseUrl + ". The provider may charge for inference.") },
                 confirmButton = { TextButton(onClick = {
                     confirmProvider = null
-                    selectProvider(profile)
+                    selectProvider(profile, keepDraft = true)
                 }) { Text("Use cloud API") } },
                 dismissButton = { TextButton(onClick = { confirmProvider = null }) { Text("Cancel") } }
             )
@@ -534,6 +640,14 @@ private fun AuraRoot() {
                     modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding()) {
                     Column {
                         if (selectedDestination == AuraDestination.CHAT) Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp)) {
+                            FilterChip(
+                                selected = selectedModelId != null,
+                                onClick = { modelDialog = true },
+                                enabled = !isProcessing && !settingsBusy && !modelLoading,
+                                label = { Text(activeProvider?.let { it.name + " · " + it.model } ?: loadedModel?.name ?: "Choose model",
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                trailingIcon = { Text("⌄") }
+                            )
                             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f), shape = RoundedCornerShape(20.dp),
                                     minLines = 1, maxLines = 4, placeholder = { Text("Message AURA…") })
@@ -544,12 +658,11 @@ private fun AuraRoot() {
                         NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                             val destinations = listOf(
                                 AuraDestination.CHAT,
-                                AuraDestination.TOOLS,
+                                AuraDestination.WORK,
                                 AuraDestination.MEMORY,
-                                AuraDestination.SKILLS,
                                 AuraDestination.SETTINGS
                             )
-                            val icons = listOf("⌂", "▦", "◉", "◆", "⚙")
+                            val icons = listOf("⌂", "▦", "◉", "⚙")
                             destinations.forEachIndexed { index, destination ->
                                 NavigationBarItem(
                                     selected = selectedDestination == destination,
@@ -575,6 +688,7 @@ private fun AuraRoot() {
                         providerName = activeProvider?.name,
                         modelLoading = modelLoading,
                         isProcessing = isProcessing,
+                        partialReply = partialReply,
                         errorMessage = runtimeError,
                         onRetry = if (failedMessageId != null && !settingsBusy && !modelLoading &&
                             (loadedModel != null || activeProvider != null)) { { sendMessage(retry = true) } } else null,
@@ -583,6 +697,10 @@ private fun AuraRoot() {
                         feedbackStates = feedbackStates,
                         onFeedback = ::applyExperienceFeedback
                     )
+                    AuraDestination.WORK -> WorkScreen { brief ->
+                        draft = brief
+                        selectedDestination = AuraDestination.CHAT
+                    }
                     AuraDestination.MEMORY -> HistoryScreen(
                         history = history,
                         onOpen = ::openHistory,
@@ -596,6 +714,11 @@ private fun AuraRoot() {
                     AuraDestination.SETTINGS -> ModelSettingsScreen(
                         models, loadedModel, providers, activeProvider, settingsBusy || modelLoading || isProcessing,
                         modelStatus, apiStatus, availableModels,
+                        discovered = discovered,
+                        onChooseFolder = { folderPicker.launch(scannedFolder) },
+                        onImportDiscovered = { importModel(it.uri, it.name) },
+                        onChatVisibility = { visibilityDialog = true },
+                        onTestReply = { testProvider = it },
                         onImport = { modelPicker.launch(arrayOf("application/octet-stream", "*/*")) },
                         onCancelTransfer = transferJob?.let { job -> { job.cancel() } },
                         onDownload = { url, name, sha -> manageModel(transfer = true) {
@@ -610,23 +733,26 @@ private fun AuraRoot() {
                             modelStatus = "Unloaded. Model file is still installed."
                         } },
                         onSaveProvider = { profile, key -> manageApi {
+                            val previous = providers.firstOrNull { it.id == profile.id }
                             withContext(Dispatchers.IO) { providerStore.save(profile, key) }
-                            if (activeProvider?.id == profile.id) selectProvider(null)
-                            availableModels = availableModels - profile.id
+                            if (activeProvider?.id == profile.id) selectProvider(null, keepDraft = true)
+                            if (key != null || previous?.baseUrl != profile.baseUrl || previous.protocol != profile.protocol) {
+                                updateModelCache(availableModels - profile.id)
+                            }
                             providers = providerStore.profiles()
                             apiStatus = "Saved on this device. Fetch models to test access."
                         } },
                         onRemoveProvider = { profile -> manageApi {
                             withContext(Dispatchers.IO) { providerStore.remove(profile) }
                             if (activeProvider?.id == profile.id) selectProvider(null)
-                            availableModels = availableModels - profile.id
+                            updateModelCache(availableModels - profile.id)
                             providers = providerStore.profiles()
                             apiStatus = "API profile removed."
                         } },
                         onListModels = { profile -> manageApi {
-                            availableModels = availableModels - profile.id
+                            updateModelCache(availableModels - profile.id)
                             val ids = withContext(Dispatchers.IO) { providerClient.listModels(profile) }
-                            availableModels = availableModels + (profile.id to ids)
+                            updateModelCache(availableModels + (profile.id to ids))
                             apiStatus = profile.name + " returned " + ids.size + " model IDs. Open Edit to select one."
                         } },
                         onUseProvider = { profile ->
@@ -648,6 +774,7 @@ private fun ChatScreen(
     providerName: String?,
     modelLoading: Boolean,
     isProcessing: Boolean,
+    partialReply: String,
     errorMessage: String?,
     onRetry: (() -> Unit)?,
     onSettings: () -> Unit,
@@ -778,7 +905,10 @@ private fun ChatScreen(
         }
         if (isProcessing) item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(providerName?.let { "Waiting for $it…" } ?: "Generating on device…",
+                if (partialReply.isNotEmpty()) {
+                    Text("AURA · ${providerName.orEmpty()}", color = MaterialTheme.colorScheme.primary)
+                    Text(partialReply)
+                } else Text(providerName?.let { "Waiting for $it…" } ?: "Generating on device…",
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }

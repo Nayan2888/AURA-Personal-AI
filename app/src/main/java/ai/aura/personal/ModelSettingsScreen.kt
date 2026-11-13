@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import ai.aura.personal.core.providers.ProviderPreset
 import ai.aura.personal.core.providers.ProviderProfile
 import ai.aura.personal.core.providers.ProviderProtocol
+import ai.aura.personal.core.inference.DiscoveredModel
+import ai.aura.personal.core.inference.localModelCatalog
 import java.io.File
 import java.util.UUID
 
@@ -40,6 +42,11 @@ internal fun ModelSettingsScreen(
     modelStatus: String?,
     apiStatus: String?,
     availableModels: Map<String, List<String>>,
+    discovered: List<DiscoveredModel>,
+    onChooseFolder: () -> Unit,
+    onImportDiscovered: (DiscoveredModel) -> Unit,
+    onChatVisibility: () -> Unit,
+    onTestReply: (ProviderProfile) -> Unit,
     onImport: () -> Unit,
     onCancelTransfer: (() -> Unit)?,
     onDownload: (String, String, String?) -> Unit,
@@ -59,18 +66,44 @@ internal fun ModelSettingsScreen(
             TextButton(onClick = { tab = 0 }) { Text(if (tab == 0) "● Model library" else "Model library") }
             TextButton(onClick = { tab = 1 }) { Text(if (tab == 1) "● API providers" else "API providers") }
         }
+        TextButton(onClick = onChatVisibility) { Text("Choose models shown in chat") }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (tab == 0) {
                 item {
                     Text("On-device models", style = MaterialTheme.typography.titleLarge)
-                    Text("AURA discovers installed .litertlm files automatically. Import a file from your phone or download from an HTTPS link.")
+                    Text("Installed models appear automatically. Choose a folder to find .litertlm files on your phone.")
                     Row {
                         TextButton(onClick = onImport, enabled = !busy) { Text("Import file") }
-                        TextButton(onClick = { download = true }, enabled = !busy) { Text("Download model") }
+                        TextButton(onClick = onChooseFolder, enabled = !busy) { Text("Scan folder") }
+                        TextButton(onClick = { download = true }, enabled = !busy) { Text("Direct URL") }
                     }
                     modelStatus?.let { Text(it) }
                     if (onCancelTransfer != null) TextButton(onClick = onCancelTransfer) { Text("Cancel transfer") }
                     if (models.isEmpty()) Text("No .litertlm files installed.")
+                }
+                items(discovered, key = { it.uri.toString() }) { file ->
+                    val installed = models.any { it.name.equals(file.name, ignoreCase = true) }
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(file.name)
+                            Text(if (installed) "Same filename already installed" else "Found on device")
+                            TextButton(onClick = { onImportDiscovered(file) }, enabled = !busy && !installed) { Text("Import") }
+                        }
+                    }
+                }
+                item { Text("Download catalog", style = MaterialTheme.typography.titleMedium) }
+                items(localModelCatalog, key = { it.file }) { model ->
+                    val installed = models.any { it.name == model.file }
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(model.title)
+                            val size = android.text.format.Formatter.formatFileSize(androidx.compose.ui.platform.LocalContext.current, model.bytes)
+                            Text("LiteRT Community · " + size + " · SHA-256 checked during download")
+                            TextButton(onClick = { onDownload(model.url, model.file, model.sha256) }, enabled = !busy && !installed) {
+                                Text(if (installed) "Installed" else "Download")
+                            }
+                        }
+                    }
                 }
                 items(models, key = { it.path }) { model ->
                     Card(Modifier.fillMaxWidth()) {
@@ -108,6 +141,9 @@ internal fun ModelSettingsScreen(
                                 TextButton(onClick = { onListModels(provider) }, enabled = !busy) { Text("Fetch models") }
                                 TextButton(onClick = { onRemoveProvider(provider) }, enabled = !busy) { Text("Remove") }
                             }
+                            TextButton(onClick = { onTestReply(provider) }, enabled = !busy && provider.model.isNotBlank()) {
+                                Text("Test reply")
+                            }
                             TextButton(onClick = { onUseProvider(provider) }, enabled = !busy && provider.model.isNotBlank()) {
                                 Text(if (activeProvider?.id == provider.id) "Select for a new chat" else "Use for chat")
                             }
@@ -124,11 +160,6 @@ internal fun ModelSettingsScreen(
         AlertDialog(onDismissRequest = { download = false }, title = { Text("Download LiteRT-LM model") },
             text = {
                 Column {
-                    TextButton(onClick = {
-                        name = "Qwen3-0.6B.litertlm"
-                        url = "https://huggingface.co/litert-community/Qwen3-0.6B/resolve/8768ea43e6d801ee0d353e5036007e6790a2ba05/" + name
-                        checksum = "c5f39b4191926786c3e6668b62af4d6eb15248dfc7a5348252a9b406f33f2108"
-                    }) { Text("Use Qwen3 0.6B · 614 MB") }
                     OutlinedTextField(url, { url = it }, label = { Text("Direct HTTPS URL") }, singleLine = true)
                     OutlinedTextField(name, { name = it }, label = { Text("File name ending in .litertlm") }, singleLine = true)
                     OutlinedTextField(checksum, { checksum = it }, label = { Text("Expected SHA-256 (optional)") }, singleLine = true)

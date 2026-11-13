@@ -51,4 +51,18 @@ class GeminiTextTest {
         }
         assertTrue(truncated.message.orEmpty().contains("token limit"))
     }
+    @Test
+    fun stream_displays_text_in_order_and_rejects_truncated_reply() {
+        val first = """data: {"candidates":[{"content":{"parts":[{"text":"नमस्ते"}]}}]}"""
+        val second = """data: {"candidates":[{"content":{"parts":[{"text":" दोस्त"}]},"finishReason":"STOP"}]}"""
+        val usage = """data: {"usageMetadata":{"totalTokenCount":20}}"""
+        val updates = mutableListOf<String>()
+        assertEquals("नमस्ते दोस्त", GeminiText.readStream(
+            listOf(first, second, usage).joinToString("\n\n").reader().buffered(), updates::add
+        ))
+        assertEquals(listOf("नमस्ते", "नमस्ते दोस्त"), updates)
+        assertThrows(IllegalStateException::class.java) {
+            GeminiText.readStream(first.reader().buffered()) {}
+        }
+    }
 }

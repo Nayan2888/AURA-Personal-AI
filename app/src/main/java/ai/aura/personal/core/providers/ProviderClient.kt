@@ -2,6 +2,7 @@ package ai.aura.personal.core.providers
 
 import ai.aura.personal.core.chat.ChatMessage
 import java.net.SocketTimeoutException
+import java.io.BufferedReader
 import java.net.UnknownHostException
 import java.net.URLEncoder
 import javax.net.ssl.SSLException
@@ -31,11 +32,13 @@ internal class ProviderClient(private val store: ProviderStore) {
         error("Provider returned too many model pages. Enter the model ID manually.")
     }
 
-    fun generate(profile: ProviderProfile, history: List<ChatMessage>, prompt: String): String {
+    fun generate(profile: ProviderProfile, history: List<ChatMessage>, prompt: String, onText: ((String) -> Unit)? = null): String {
         require(profile.model.isNotBlank()) { "Select a provider model first." }
         if (usesNativeGemini(profile)) {
-            val response = request(profile, GeminiText.generationPath(profile.model), GeminiText.body(history, prompt))
-            return GeminiText.reply(response)
+            val path = GeminiText.generationPath(profile.model, streaming = onText != null)
+            val body = GeminiText.body(history, prompt)
+            return if (onText == null) GeminiText.reply(request(profile, path, body))
+                else exchange(profile, path, body, streaming = true) { GeminiText.readStream(it, onText) }
         }
         val claude = profile.protocol == ProviderProtocol.CLAUDE
         val messages = JSONArray()
@@ -66,7 +69,23 @@ internal class ProviderClient(private val store: ProviderStore) {
     private fun usesNativeGemini(profile: ProviderProfile): Boolean =
         profile.protocol == ProviderProtocol.OPENAI && profile.endpoint().toString() == ProviderPreset.GEMINI.baseUrl
 
-    private fun request(profile: ProviderProfile, path: String, body: JSONObject? = null): JSONObject {
+    private fun request(profile: ProviderProfile, path: String, body: JSONObject? = null): JSONObject =
+        exchange(profile, path, body) { reader ->
+            val result = StringBuilder()
+            val buffer = CharArray(4096)
+            while (true) {
+                val count = reader.read(buffer)
+                if (count < 0) break
+                check(result.length + count <= 2_000_000) { "Provider response exceeded the app limit." }
+                result.append(buffer, 0, count)
+            }
+            JSONObject(result.toString())
+        }
+
+    private fun <T> exchange(
+        profile: ProviderProfile, path: String, body: JSONObject?, streaming: Boolean = false,
+        decode: (BufferedReader) -> T
+    ): T {
         val gemini = usesNativeGemini(profile)
         val base = if (gemini) "https://generativelanguage.googleapis.com/v1beta" else profile.endpoint().toString()
         val connection = java.net.URI(base + path).toURL().openConnection() as HttpsURLConnection
@@ -74,7 +93,7 @@ internal class ProviderClient(private val store: ProviderStore) {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 15_000
             connection.readTimeout = if (body == null) 30_000 else 90_000
-            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Accept", if (streaming) "text/event-stream" else "application/json")
             val key = store.key(profile)
             if (gemini) {
                 connection.setRequestProperty("x-goog-api-key", key)
@@ -102,20 +121,12 @@ internal class ProviderClient(private val store: ProviderStore) {
                     else -> "Provider returned HTTP $status."
                 }
             }
-            val raw = connection.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                val result = StringBuilder()
-                val buffer = CharArray(4096)
-                while (true) {
-                    val count = reader.read(buffer)
-                    if (count < 0) break
-                    check(result.length + count <= 2_000_000) { "Provider response exceeded the app limit." }
-                    result.append(buffer, 0, count)
-                }
-                result.toString()
+            if (streaming) check(connection.contentType.orEmpty().startsWith("text/event-stream", ignoreCase = true)) {
+                "Gemini returned an unexpected streaming response."
             }
-            return try { JSONObject(raw) } catch (_: org.json.JSONException) {
-                error("Provider returned invalid JSON.")
-            }
+            return connection.inputStream.bufferedReader(Charsets.UTF_8).use(decode)
+        } catch (_: org.json.JSONException) {
+            error("${profile.name} returned an unreadable response. Check the selected endpoint and model.")
         } catch (_: SocketTimeoutException) {
             error(if (body == null) "${profile.name} timed out while listing models. Check your connection and try again."
                 else "${profile.name} did not return a reply in time. Retry this message or select a faster chat model in Settings.")
